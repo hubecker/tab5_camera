@@ -1,25 +1,28 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.pins import gpio_output_pin_schema
-from esphome import automation
 from esphome.const import (
     CONF_FREQUENCY,
     CONF_NAME,
     CONF_RESET_PIN,
 )
 
+# Dépendances et propriétaires du code
 DEPENDENCIES = ["esp32"]
 CODEOWNERS = ["@youkorr"]
 
+# Constantes pour la configuration
 CONF_EXTERNAL_CLOCK = "external_clock"
 CONF_EXTERNAL_CLOCK_PIN = "external_clock_pin"
 CONF_EXTERNAL_CLOCK_FREQUENCY = "external_clock_frequency"
 CONF_AUTO_START_STREAMING = "auto_start_streaming"
 CONF_PIN = "pin"
 
+# Namespace pour le composant
 tab5_camera_ns = cg.esphome_ns.namespace("tab5_camera")
 Tab5Camera = tab5_camera_ns.class_("Tab5Camera", cg.Component)
 
+# Validation de la fréquence
 def validate_frequency(value):
     """Valide la fréquence et la convertit en Hz."""
     if isinstance(value, str):
@@ -31,6 +34,7 @@ def validate_frequency(value):
             return int(float(value[:-2]))
     return cv.frequency(value)
 
+# Validation du numéro de pin GPIO
 def validate_pin(value):
     """Valide un numéro de pin GPIO."""
     if isinstance(value, str) and value.startswith("GPIO"):
@@ -43,6 +47,7 @@ EXTERNAL_CLOCK_SCHEMA = cv.Schema({
     cv.Required(CONF_FREQUENCY): validate_frequency,
 })
 
+# Schéma principal de configuration
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(Tab5Camera),
     cv.Optional(CONF_NAME, default="Tab5 Camera"): cv.string_strict,
@@ -53,14 +58,16 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_AUTO_START_STREAMING, default=False): cv.boolean,
 }).extend(cv.COMPONENT_SCHEMA)
 
+# Génération du code C++
 async def to_code(config):
+    # Création de la variable principale
     var = cg.new_Pvariable(config[cv.GenerateID()])
     await cg.register_component(var, config)
 
     # Configuration du nom
     cg.add(var.set_name(config[CONF_NAME]))
 
-    # Par défaut, utilise GPIO36 et 20 MHz si non spécifié
+    # Configuration par défaut pour l'horloge externe
     external_clock_pin = 36
     external_clock_frequency = 20_000_000
 
@@ -77,16 +84,21 @@ async def to_code(config):
     if CONF_EXTERNAL_CLOCK_FREQUENCY in config:
         external_clock_frequency = config[CONF_EXTERNAL_CLOCK_FREQUENCY]
 
-    # Applique la configuration
+    # Applique la configuration de l'horloge externe
     cg.add(var.set_external_clock_pin(external_clock_pin))
     cg.add(var.set_external_clock_frequency(external_clock_frequency))
 
-    # Broche de reset
+    # Configuration de la broche de reset
     if CONF_RESET_PIN in config:
-        reset_pin = await gpio_output_pin_schema(config[CONF_RESET_PIN])
-        cg.add(var.set_reset_pin(reset_pin))
+        try:
+            reset_pin = await gpio_output_pin_schema(config[CONF_RESET_PIN])
+            cg.add(var.set_reset_pin(reset_pin))
+        except Exception as e:
+            raise cv.Invalid(f"Invalid reset pin configuration: {e}")
+    else:
+        raise cv.Invalid("Reset pin is required but not provided.")
 
-    # Démarrage automatique du streaming
+    # Configuration du démarrage automatique du streaming
     cg.add(var.set_auto_start_streaming(config[CONF_AUTO_START_STREAMING]))
 
 
