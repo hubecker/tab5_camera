@@ -1,17 +1,22 @@
 #pragma once
 
 #include "esphome/core/component.h"
-#include "esphome/core/hal.h"
+#include "esphome/core/gpio.h"
+#include "esphome/core/preferences.h"
+#include "esphome/components/esp32_camera_web_server/esp32_camera_web_server.h"
 
 #ifdef USE_ESP32
 
-// Nouvelle API ESP32-P4
-#if __has_include("esp_cam_ctlr_csi.h")
+#ifdef HAS_ESP32_P4_CAMERA
 #include "esp_cam_ctlr_csi.h"
 #include "esp_cam_ctlr.h"
 #include "driver/isp.h"
 #include "esp_cache.h"
-#define HAS_ESP32_P4_CAMERA
+#include "esp_heap_caps.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
+#include "freertos/queue.h"
 #endif
 
 namespace esphome {
@@ -19,36 +24,86 @@ namespace tab5_camera {
 
 class Tab5Camera : public Component {
  public:
+  Tab5Camera() = default;
+  ~Tab5Camera();
+
   void setup() override;
   void dump_config() override;
   float get_setup_priority() const override;
-  
-  void set_name(const std::string &name) { this->name_ = name; }
+
+  // Configuration des pins
   void set_external_clock_pin(uint8_t pin) { this->external_clock_pin_ = pin; }
-  void set_external_clock_frequency(uint32_t frequency) { this->external_clock_frequency_ = frequency; }
+  void set_external_clock_frequency(uint32_t freq) { this->external_clock_frequency_ = freq; }
   void set_reset_pin(GPIOPin *pin) { this->reset_pin_ = pin; }
-  
+
+  // Fonctions de capture
   bool take_snapshot();
+  
+  // Fonctions de streaming
+  bool start_streaming();
+  bool stop_streaming();
+  bool is_streaming() const { return this->streaming_active_; }
+  
+  // Accès aux données du frame buffer
+  uint8_t* get_frame_buffer() const { return static_cast<uint8_t*>(this->frame_buffer_); }
+  size_t get_frame_buffer_size() const { return this->frame_buffer_size_; }
+  
+  // Callbacks pour le streaming
+  void add_on_frame_callback(std::function<void(uint8_t*, size_t)> &&callback) {
+    this->on_frame_callbacks_.add(std::move(callback));
+  }
+
+  // Configuration pour intégration avec le serveur web
+  void set_web_server(esp32_camera_web_server::ESP32CameraWebServer *web_server) {
+    this->web_server_ = web_server;
+  }
 
  protected:
 #ifdef HAS_ESP32_P4_CAMERA
   bool init_camera_();
   void deinit_camera_();
   
+  // Callbacks statiques pour le contrôleur de caméra
   static bool camera_get_new_vb_callback(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data);
   static bool camera_get_finished_trans_callback(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data);
   
+  // Tâche de streaming
+  static void streaming_task(void *parameter);
+  void streaming_loop_();
+  
+  // Variables ESP32-P4
   esp_cam_ctlr_handle_t cam_handle_{nullptr};
   isp_proc_handle_t isp_proc_{nullptr};
   void *frame_buffer_{nullptr};
   size_t frame_buffer_size_{0};
   bool camera_initialized_{false};
-#endif
   
-  std::string name_;
-  uint8_t external_clock_pin_{36};
-  uint32_t external_clock_frequency_{20000000}; // 20MHz
+  // Variables de streaming
+  TaskHandle_t streaming_task_handle_{nullptr};
+  SemaphoreHandle_t frame_ready_semaphore_{nullptr};
+  QueueHandle_t frame_queue_{nullptr};
+  bool streaming_active_{false};
+  bool streaming_should_stop_{false};
+  
+  // Structure pour les frames en queue
+  struct FrameData {
+    void* buffer;
+    size_t size;
+    uint32_t timestamp;
+  };
+#endif
+
+  // Configuration
+  uint8_t external_clock_pin_{0};
+  uint32_t external_clock_frequency_{20000000};  // 20MHz par défaut
   GPIOPin *reset_pin_{nullptr};
+  std::string name_{"tab5_camera"};
+
+  // Callbacks
+  CallbackManager<void(uint8_t*, size_t)> on_frame_callbacks_;
+  
+  // Intégration serveur web
+  esp32_camera_web_server::ESP32CameraWebServer *web_server_{nullptr};
 };
 
 }  // namespace tab5_camera
