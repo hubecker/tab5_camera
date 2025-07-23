@@ -6,51 +6,18 @@
 
 static const char *const TAG = "tab5_camera";
 
+// Constantes de configuration pour Tab5
+#define TAB5_CAMERA_H_RES 640
+#define TAB5_CAMERA_V_RES 480
+#define TAB5_MIPI_CSI_LANE_BITRATE_MBPS 400
+#define TAB5_ISP_CLOCK_HZ 80000000  // 80MHz
+
 namespace esphome {
 namespace tab5_camera {
 
 void Tab5Camera::setup() {
-#ifdef HAS_ESP_CAMERA
-  ESP_LOGCONFIG(TAG, "Setting up Tab5 Camera...");
-  
-  // Configuration de la caméra pour MIPI-CSI
-  this->camera_config_.pin_pwdn = -1;  // power_down_pin (NO_PIN)
-  this->camera_config_.pin_reset = this->reset_pin_ ? this->reset_pin_->get_pin() : -1;
-  this->camera_config_.pin_xclk = this->external_clock_pin_;
-  
-  // Broches MIPI-CSI spécifiques à la Tab5
-  this->camera_config_.pin_sscb_sda = -1;  // I2C géré séparément
-  this->camera_config_.pin_sscb_scl = -1;  // I2C géré séparément
-  
-  // Interface MIPI-CSI (pas de broches parallèles)
-  this->camera_config_.pin_d7 = -1;
-  this->camera_config_.pin_d6 = -1;
-  this->camera_config_.pin_d5 = -1;
-  this->camera_config_.pin_d4 = -1;
-  this->camera_config_.pin_d3 = -1;
-  this->camera_config_.pin_d2 = -1;
-  this->camera_config_.pin_d1 = -1;
-  this->camera_config_.pin_d0 = -1;
-  this->camera_config_.pin_vsync = -1;
-  this->camera_config_.pin_href = -1;
-  this->camera_config_.pin_pclk = -1;
-  
-  // Configuration MIPI-CSI
-  this->camera_config_.xclk_freq_hz = this->external_clock_frequency_;
-  this->camera_config_.ledc_timer = LEDC_TIMER_0;
-  this->camera_config_.ledc_channel = LEDC_CHANNEL_0;
-  
-  // Format et résolution
-  this->camera_config_.pixel_format = PIXFORMAT_JPEG;
-  this->camera_config_.frame_size = FRAMESIZE_VGA;  // 640x480
-  this->camera_config_.jpeg_quality = 12;
-  this->camera_config_.fb_count = 2;
-  this->camera_config_.fb_location = CAMERA_FB_IN_PSRAM;
-  this->camera_config_.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
-  
-  // Configuration spécifique ESP32-P4 MIPI
-  this->camera_config_.conv_limit_en = false;
-  this->camera_config_.conv_mode = YUV422_TO_YUV420;
+#ifdef HAS_ESP32_P4_CAMERA
+  ESP_LOGCONFIG(TAG, "Setting up Tab5 Camera with ESP32-P4 MIPI-CSI...");
   
   if (!this->init_camera_()) {
     this->mark_failed();
@@ -59,22 +26,24 @@ void Tab5Camera::setup() {
   
   ESP_LOGCONFIG(TAG, "Tab5 Camera '%s' setup completed", this->name_.c_str());
 #else
-  ESP_LOGE(TAG, "esp_camera.h not available - Tab5 Camera component disabled");
+  ESP_LOGE(TAG, "ESP32-P4 MIPI-CSI API not available - Tab5 Camera component disabled");
   this->mark_failed();
 #endif
 }
 
 void Tab5Camera::dump_config() {
   ESP_LOGCONFIG(TAG, "Tab5 Camera '%s':", this->name_.c_str());
-#ifdef HAS_ESP_CAMERA
+#ifdef HAS_ESP32_P4_CAMERA
+  ESP_LOGCONFIG(TAG, "  Resolution: %dx%d", TAB5_CAMERA_H_RES, TAB5_CAMERA_V_RES);
   ESP_LOGCONFIG(TAG, "  External Clock Pin: GPIO%u", this->external_clock_pin_);
   ESP_LOGCONFIG(TAG, "  External Clock Frequency: %u Hz", this->external_clock_frequency_);
+  ESP_LOGCONFIG(TAG, "  Frame Buffer Size: %zu bytes", this->frame_buffer_size_);
   
   if (this->reset_pin_) {
     LOG_PIN("  Reset Pin: ", this->reset_pin_);
   }
 #else
-  ESP_LOGCONFIG(TAG, "  Status: esp_camera.h not available");
+  ESP_LOGCONFIG(TAG, "  Status: ESP32-P4 MIPI-CSI API not available");
 #endif
   
   if (this->is_failed()) {
@@ -86,7 +55,7 @@ float Tab5Camera::get_setup_priority() const {
   return setup_priority::HARDWARE - 1.0f;
 }
 
-#ifdef HAS_ESP_CAMERA
+#ifdef HAS_ESP32_P4_CAMERA
 bool Tab5Camera::init_camera_() {
   if (this->camera_initialized_) {
     return true;
@@ -101,37 +70,94 @@ bool Tab5Camera::init_camera_() {
     delay(10);
   }
   
-  // Initialisation de la caméra ESP32-P4 avec MIPI-CSI
-  esp_err_t err = esp_camera_init(&this->camera_config_);
-  if (err != ESP_OK) {
-    ESP_LOGE(TAG, "Camera init failed with error 0x%x", err);
+  // Calcul de la taille du frame buffer
+  this->frame_buffer_size_ = TAB5_CAMERA_H_RES * TAB5_CAMERA_V_RES * 2; // RGB565 = 2 bytes par pixel
+  
+  // Allocation du frame buffer
+  this->frame_buffer_ = heap_caps_malloc(this->frame_buffer_size_, MALLOC_CAP_SPIRAM);
+  if (!this->frame_buffer_) {
+    ESP_LOGE(TAG, "Failed to allocate frame buffer (%zu bytes)", this->frame_buffer_size_);
     return false;
   }
   
-  // Configuration du capteur
-  sensor_t *sensor = esp_camera_sensor_get();
-  if (sensor) {
-    // Réglages spécifiques pour la Tab5
-    sensor->set_framesize(sensor, FRAMESIZE_VGA);
-    sensor->set_quality(sensor, 12);
-    sensor->set_colorbar(sensor, 0);
-    sensor->set_whitebal(sensor, 1);
-    sensor->set_gain_ctrl(sensor, 1);
-    sensor->set_exposure_ctrl(sensor, 1);
-    sensor->set_hmirror(sensor, 0);
-    sensor->set_vflip(sensor, 0);
-    sensor->set_awb_gain(sensor, 1);
-    sensor->set_agc_gain(sensor, 0);
-    sensor->set_aec_value(sensor, 300);
-    sensor->set_aec2(sensor, 0);
-    sensor->set_dcw(sensor, 1);
-    sensor->set_bpc(sensor, 0);
-    sensor->set_wpc(sensor, 1);
-    sensor->set_raw_gma(sensor, 1);
-    sensor->set_lenc(sensor, 1);
-    sensor->set_special_effect(sensor, 0);
-    sensor->set_wb_mode(sensor, 0);
-    sensor->set_ae_level(sensor, 0);
+  ESP_LOGD(TAG, "Frame buffer allocated: %p, size: %zu bytes", this->frame_buffer_, this->frame_buffer_size_);
+  
+  // Configuration du contrôleur CSI
+  esp_cam_ctlr_csi_config_t csi_config = {
+    .ctlr_id = 0,
+    .h_res = TAB5_CAMERA_H_RES,
+    .v_res = TAB5_CAMERA_V_RES,
+    .lane_bit_rate_mbps = TAB5_MIPI_CSI_LANE_BITRATE_MBPS,
+    .input_data_color_type = CAM_CTLR_COLOR_RAW8,
+    .output_data_color_type = CAM_CTLR_COLOR_RGB565,
+    .data_lane_num = 2,
+    .byte_swap_en = false,
+    .queue_items = 1,
+  };
+  
+  esp_err_t ret = esp_cam_new_csi_ctlr(&csi_config, &this->cam_handle_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "CSI controller init failed: %s", esp_err_to_name(ret));
+    return false;
+  }
+  
+  // Configuration des callbacks
+  esp_cam_ctlr_trans_t new_trans = {
+    .buffer = this->frame_buffer_,
+    .buflen = this->frame_buffer_size_,
+  };
+  
+  esp_cam_ctlr_evt_cbs_t cbs = {
+    .on_get_new_trans = Tab5Camera::camera_get_new_vb_callback,
+    .on_trans_finished = Tab5Camera::camera_get_finished_trans_callback,
+  };
+  
+  ret = esp_cam_ctlr_register_event_callbacks(this->cam_handle_, &cbs, &new_trans);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to register camera callbacks: %s", esp_err_to_name(ret));
+    return false;
+  }
+  
+  // Activation du contrôleur de caméra
+  ret = esp_cam_ctlr_enable(this->cam_handle_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to enable camera controller: %s", esp_err_to_name(ret));
+    return false;
+  }
+  
+  // Configuration de l'ISP
+  esp_isp_processor_cfg_t isp_config = {
+    .clk_hz = TAB5_ISP_CLOCK_HZ,
+    .input_data_source = ISP_INPUT_DATA_SOURCE_CSI,
+    .input_data_color_type = ISP_COLOR_RAW8,
+    .output_data_color_type = ISP_COLOR_RGB565,
+    .has_line_start_packet = false,
+    .has_line_end_packet = false,
+    .h_res = TAB5_CAMERA_H_RES,
+    .v_res = TAB5_CAMERA_V_RES,
+  };
+  
+  ret = esp_isp_new_processor(&isp_config, &this->isp_proc_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "ISP processor init failed: %s", esp_err_to_name(ret));
+    return false;
+  }
+  
+  ret = esp_isp_enable(this->isp_proc_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to enable ISP processor: %s", esp_err_to_name(ret));
+    return false;
+  }
+  
+  // Initialisation du frame buffer
+  memset(this->frame_buffer_, 0xFF, this->frame_buffer_size_);
+  esp_cache_msync(this->frame_buffer_, this->frame_buffer_size_, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+  
+  // Démarrage de la caméra
+  ret = esp_cam_ctlr_start(this->cam_handle_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to start camera controller: %s", esp_err_to_name(ret));
+    return false;
   }
   
   this->camera_initialized_ = true;
@@ -141,35 +167,63 @@ bool Tab5Camera::init_camera_() {
 
 void Tab5Camera::deinit_camera_() {
   if (this->camera_initialized_) {
-    esp_camera_deinit();
+    if (this->cam_handle_) {
+      esp_cam_ctlr_stop(this->cam_handle_);
+      esp_cam_ctlr_disable(this->cam_handle_);
+      esp_cam_del_csi_ctlr(this->cam_handle_);
+      this->cam_handle_ = nullptr;
+    }
+    
+    if (this->isp_proc_) {
+      esp_isp_disable(this->isp_proc_);
+      esp_isp_del_processor(this->isp_proc_);
+      this->isp_proc_ = nullptr;
+    }
+    
+    if (this->frame_buffer_) {
+      heap_caps_free(this->frame_buffer_);
+      this->frame_buffer_ = nullptr;
+    }
+    
     this->camera_initialized_ = false;
     ESP_LOGD(TAG, "Camera '%s' deinitialized", this->name_.c_str());
   }
 }
+
+bool Tab5Camera::camera_get_new_vb_callback(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data) {
+  esp_cam_ctlr_trans_t *new_trans = (esp_cam_ctlr_trans_t *)user_data;
+  trans->buffer = new_trans->buffer;
+  trans->buflen = new_trans->buflen;
+  return false;
+}
+
+bool Tab5Camera::camera_get_finished_trans_callback(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data) {
+  return false;
+}
 #endif
 
 bool Tab5Camera::take_snapshot() {
-#ifdef HAS_ESP_CAMERA
+#ifdef HAS_ESP32_P4_CAMERA
   if (!this->camera_initialized_) {
     ESP_LOGE(TAG, "Camera '%s' not initialized", this->name_.c_str());
     return false;
   }
   
-  camera_fb_t *fb = esp_camera_fb_get();
-  if (!fb) {
-    ESP_LOGW(TAG, "Camera '%s' capture failed", this->name_.c_str());
+  esp_cam_ctlr_trans_t trans = {
+    .buffer = this->frame_buffer_,
+    .buflen = this->frame_buffer_size_,
+  };
+  
+  esp_err_t ret = esp_cam_ctlr_receive(this->cam_handle_, &trans, 1000 / portTICK_PERIOD_MS);
+  if (ret != ESP_OK) {
+    ESP_LOGW(TAG, "Camera '%s' capture failed: %s", this->name_.c_str(), esp_err_to_name(ret));
     return false;
   }
   
-  ESP_LOGD(TAG, "Camera '%s' snapshot taken, size: %zu bytes", this->name_.c_str(), fb->len);
-  
-  // Ici tu peux traiter l'image ou l'envoyer via un service
-  // Pour l'instant on libère juste le buffer
-  esp_camera_fb_return(fb);
-  
+  ESP_LOGD(TAG, "Camera '%s' snapshot taken, size: %zu bytes", this->name_.c_str(), trans.buflen);
   return true;
 #else
-  ESP_LOGE(TAG, "Camera '%s' not available - esp_camera.h missing", this->name_.c_str());
+  ESP_LOGE(TAG, "Camera '%s' not available - ESP32-P4 MIPI-CSI API missing", this->name_.c_str());
   return false;
 #endif
 }
@@ -178,5 +232,6 @@ bool Tab5Camera::take_snapshot() {
 }  // namespace esphome
 
 #endif  // USE_ESP32
+
 
 
