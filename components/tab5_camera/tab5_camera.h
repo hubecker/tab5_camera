@@ -22,15 +22,7 @@
 namespace esphome {
 namespace tab5_camera {
 
-class Tab5Camera;
-
-// ===== TRIGGER POUR NOUVELLES FRAMES =====
-class Tab5CameraOnFrameTrigger : public Trigger<> {
- public:
-  explicit Tab5CameraOnFrameTrigger(Tab5Camera *parent) { parent->add_on_frame_callback([this]() { this->trigger(); }); }
-};
-
-// ===== CLASSE PRINCIPALE =====
+// ===== CLASSE PRINCIPALE (déclaration complète d'abord) =====
 class Tab5Camera : public Component {
  public:
   void setup() override;
@@ -78,9 +70,6 @@ class Tab5Camera : public Component {
   uint32_t get_frame_count() const { return this->frame_count_; }
   float get_current_fps() const { return this->current_fps_; }
   uint32_t get_dropped_frames() const { return this->dropped_frames_; }
-  
-  // Triggers pour ESPHome
-  Tab5CameraOnFrameTrigger *get_on_frame_trigger() { return new Tab5CameraOnFrameTrigger(this); }
 
  protected:
 #ifdef HAS_ESP32_P4_CAMERA
@@ -94,7 +83,7 @@ class Tab5Camera : public Component {
   void process_new_frame_();
   void calculate_fps_();
   
-  // Callbacks ESP32-P4
+  // Callbacks ESP32-P4 - DÉCLARATION CORRECTE
   static bool camera_get_new_vb_callback_(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data);
   static bool camera_get_finished_trans_callback_(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data);
   
@@ -131,6 +120,18 @@ class Tab5Camera : public Component {
   // Buffer management
   bool using_double_buffer_{true};
   volatile bool buffer_swap_needed_{false};
+#else
+  // Variables vides pour compilation sans ESP32-P4
+  bool streaming_active_{false};
+  volatile bool new_frame_available_{false};
+  void *frame_buffer_{nullptr};
+  size_t frame_buffer_size_{0};
+  uint16_t frame_width_{640};
+  uint16_t frame_height_{480};
+  uint32_t frame_count_{0};
+  uint32_t dropped_frames_{0};
+  float current_fps_{0.0f};
+  uint8_t streaming_fps_{30};
 #endif
   
   // Configuration de base
@@ -143,6 +144,14 @@ class Tab5Camera : public Component {
   std::vector<std::function<void()>> on_frame_callbacks_;
   std::vector<std::function<void()>> on_streaming_start_callbacks_;
   std::vector<std::function<void()>> on_streaming_stop_callbacks_;
+};
+
+// ===== TRIGGER POUR NOUVELLES FRAMES (après la définition complète) =====
+class Tab5CameraOnFrameTrigger : public Trigger<> {
+ public:
+  explicit Tab5CameraOnFrameTrigger(Tab5Camera *parent) { 
+    parent->add_on_frame_callback([this]() { this->trigger(); }); 
+  }
 };
 
 // ===== ACTIONS ESPHOME =====
@@ -177,6 +186,7 @@ template<typename... Ts> class TakeSnapshotAction : public Action<Ts...> {
 }  // namespace esphome
 
 #endif  // USE_ESP32
+
 
 
 
