@@ -10,6 +10,7 @@ namespace esphome {
 namespace tab5_camera {
 
 void Tab5Camera::setup() {
+#ifdef HAS_ESP_CAMERA
   ESP_LOGCONFIG(TAG, "Setting up Tab5 Camera...");
   
   // Configuration de la caméra pour MIPI-CSI
@@ -57,16 +58,24 @@ void Tab5Camera::setup() {
   }
   
   ESP_LOGCONFIG(TAG, "Tab5 Camera '%s' setup completed", this->name_.c_str());
+#else
+  ESP_LOGE(TAG, "esp_camera.h not available - Tab5 Camera component disabled");
+  this->mark_failed();
+#endif
 }
 
 void Tab5Camera::dump_config() {
   ESP_LOGCONFIG(TAG, "Tab5 Camera '%s':", this->name_.c_str());
+#ifdef HAS_ESP_CAMERA
   ESP_LOGCONFIG(TAG, "  External Clock Pin: GPIO%u", this->external_clock_pin_);
   ESP_LOGCONFIG(TAG, "  External Clock Frequency: %u Hz", this->external_clock_frequency_);
   
   if (this->reset_pin_) {
     LOG_PIN("  Reset Pin: ", this->reset_pin_);
   }
+#else
+  ESP_LOGCONFIG(TAG, "  Status: esp_camera.h not available");
+#endif
   
   if (this->is_failed()) {
     ESP_LOGCONFIG(TAG, "  Setup Failed");
@@ -77,6 +86,7 @@ float Tab5Camera::get_setup_priority() const {
   return setup_priority::HARDWARE - 1.0f;
 }
 
+#ifdef HAS_ESP_CAMERA
 bool Tab5Camera::init_camera_() {
   if (this->camera_initialized_) {
     return true;
@@ -136,8 +146,10 @@ void Tab5Camera::deinit_camera_() {
     ESP_LOGD(TAG, "Camera '%s' deinitialized", this->name_.c_str());
   }
 }
+#endif
 
 bool Tab5Camera::take_snapshot() {
+#ifdef HAS_ESP_CAMERA
   if (!this->camera_initialized_) {
     ESP_LOGE(TAG, "Camera '%s' not initialized", this->name_.c_str());
     return false;
@@ -156,10 +168,15 @@ bool Tab5Camera::take_snapshot() {
   esp_camera_fb_return(fb);
   
   return true;
+#else
+  ESP_LOGE(TAG, "Camera '%s' not available - esp_camera.h missing", this->name_.c_str());
+  return false;
+#endif
 }
 
 }  // namespace tab5_camera
 }  // namespace esphome
 
 #endif  // USE_ESP32
+
 
