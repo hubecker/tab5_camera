@@ -19,6 +19,7 @@ namespace tab5_camera {
 
 Tab5Camera::~Tab5Camera() {
   this->deinit_camera_();
+  void deinit_camera_();
 }
 
 void Tab5Camera::setup() {
