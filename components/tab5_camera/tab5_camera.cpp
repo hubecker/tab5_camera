@@ -1,6 +1,7 @@
 #include "tab5_camera.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
+#include "esphome/core/hal.h"
 
 #ifdef USE_ESP32
 
@@ -63,7 +64,23 @@ void Tab5Camera::setup() {
 
 void Tab5Camera::dump_config() {
   ESP_LOGCONFIG(TAG, "Tab5 Camera '%s':", this->name_.c_str());
+  
+  // Debug des macros disponibles
+  ESP_LOGCONFIG(TAG, "  Platform Debug:");
+#ifdef USE_ESP32
+  ESP_LOGCONFIG(TAG, "    USE_ESP32: YES");
+#else
+  ESP_LOGCONFIG(TAG, "    USE_ESP32: NO");
+#endif
+
+#ifdef CONFIG_IDF_TARGET_ESP32P4
+  ESP_LOGCONFIG(TAG, "    CONFIG_IDF_TARGET_ESP32P4: YES");
+#else
+  ESP_LOGCONFIG(TAG, "    CONFIG_IDF_TARGET_ESP32P4: NO");
+#endif
+
 #ifdef HAS_ESP32_P4_CAMERA
+  ESP_LOGCONFIG(TAG, "    HAS_ESP32_P4_CAMERA: YES");
   ESP_LOGCONFIG(TAG, "  Resolution: %dx%d", TAB5_CAMERA_H_RES, TAB5_CAMERA_V_RES);
   if (this->external_clock_pin_ > 0) {
     ESP_LOGCONFIG(TAG, "  External Clock Pin: GPIO%u", this->external_clock_pin_);
@@ -71,11 +88,13 @@ void Tab5Camera::dump_config() {
   }
   ESP_LOGCONFIG(TAG, "  Frame Buffer Size: %zu bytes", this->frame_buffer_size_);
   ESP_LOGCONFIG(TAG, "  Streaming Support: Available");
+  ESP_LOGCONFIG(TAG, "  I2C Address: 0x%02X", this->address_);
   
   if (this->reset_pin_) {
     LOG_PIN("  Reset Pin: ", this->reset_pin_);
   }
 #else
+  ESP_LOGCONFIG(TAG, "    HAS_ESP32_P4_CAMERA: NO");
   ESP_LOGCONFIG(TAG, "  Status: ESP32-P4 MIPI-CSI API not available");
 #endif
   
@@ -89,6 +108,53 @@ float Tab5Camera::get_setup_priority() const {
 }
 
 #ifdef HAS_ESP32_P4_CAMERA
+bool Tab5Camera::init_ldo_() {
+  if (this->ldo_initialized_) {
+    return true;
+  }
+  
+  ESP_LOGD(TAG, "Initializing MIPI LDO regulator");
+  
+  esp_ldo_channel_config_t ldo_mipi_phy_config = {
+    .chan_id = 3,  // LDO channel ID pour MIPI (ajuste selon ta config)
+    .voltage_mv = 2500,  // 2.5V pour MIPI PHY
+  };
+  
+  esp_err_t ret = esp_ldo_acquire_channel(&ldo_mipi_phy_config, &this->ldo_mipi_phy_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to acquire MIPI LDO channel: %s", esp_err_to_name(ret));
+    return false;
+  }
+  
+  this->ldo_initialized_ = true;
+  ESP_LOGD(TAG, "MIPI LDO regulator initialized successfully");
+  return true;
+}
+
+bool Tab5Camera::init_sensor_() {
+  if (this->sensor_initialized_) {
+    return true;
+  }
+  
+  ESP_LOGD(TAG, "Initializing camera sensor at I2C address 0x%02X", this->address_);
+  
+  // Exemple d'écriture I2C pour initialiser le capteur
+  // Remplace par les registres spécifiques à ton capteur
+  uint8_t config_data = 0x80;  // Exemple : reset register
+  if (!this->write_byte(0x01, config_data)) {
+    ESP_LOGE(TAG, "Failed to write to camera sensor");
+    return false;
+  }
+  
+  delayMicroseconds(10000);  // Attendre 10ms la fin du reset
+  
+  // Tu peux ajouter d'autres configurations ici
+  
+  this->sensor_initialized_ = true;
+  ESP_LOGD(TAG, "Camera sensor initialized successfully");
+  return true;
+}
+
 bool Tab5Camera::init_camera_() {
   if (this->camera_initialized_) {
     return true;
@@ -96,14 +162,26 @@ bool Tab5Camera::init_camera_() {
   
   ESP_LOGD(TAG, "Initializing camera '%s'...", this->name_.c_str());
   
+  // Initialisation du LDO MIPI
+  if (!this->init_ldo_()) {
+    ESP_LOGE(TAG, "Failed to initialize MIPI LDO");
+    return false;
+  }
+  
   // Reset de la caméra si pin disponible
   if (this->reset_pin_) {
     ESP_LOGD(TAG, "Executing camera reset sequence");
     this->reset_pin_->setup();
     this->reset_pin_->digital_write(false);
-    delay(10);
+    delayMicroseconds(10000);  // 10ms
     this->reset_pin_->digital_write(true);
-    delay(10);
+    delayMicroseconds(10000);  // 10ms
+  }
+  
+  // Initialisation du capteur I2C
+  if (!this->init_sensor_()) {
+    ESP_LOGE(TAG, "Failed to initialize camera sensor");
+    return false;
   }
   
   // Calcul de la taille du frame buffer
@@ -225,7 +303,14 @@ void Tab5Camera::deinit_camera_() {
       this->frame_buffer_ = nullptr;
     }
     
+    if (this->ldo_mipi_phy_) {
+      esp_ldo_release_channel(this->ldo_mipi_phy_);
+      this->ldo_mipi_phy_ = nullptr;
+    }
+    
     this->camera_initialized_ = false;
+    this->sensor_initialized_ = false;
+    this->ldo_initialized_ = false;
     ESP_LOGD(TAG, "Camera '%s' deinitialized", this->name_.c_str());
   }
   
@@ -404,6 +489,7 @@ void Tab5Camera::streaming_loop_() {
 }  // namespace esphome
 
 #endif  // USE_ESP32
+
 
 
 
