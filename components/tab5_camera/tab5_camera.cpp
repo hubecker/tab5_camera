@@ -6,7 +6,7 @@
 
 static const char *const TAG = "tab5_camera";
 
-// Constantes de configuration pour Tab5
+// Configuration constants for Tab5
 #define TAB5_CAMERA_H_RES 640
 #define TAB5_CAMERA_V_RES 480
 #define TAB5_MIPI_CSI_LANE_BITRATE_MBPS 400
@@ -18,15 +18,16 @@ namespace esphome {
 namespace tab5_camera {
 
 Tab5Camera::~Tab5Camera() {
+#ifdef HAS_ESP32_P4_CAMERA
   this->deinit_camera_();
-
+#endif
 }
 
 void Tab5Camera::setup() {
 #ifdef HAS_ESP32_P4_CAMERA
   ESP_LOGCONFIG(TAG, "Setting up Tab5 Camera with ESP32-P4 MIPI-CSI...");
   
-  // Création des objets de synchronisation
+  // Create synchronization objects
   this->frame_ready_semaphore_ = xSemaphoreCreateBinary();
   if (!this->frame_ready_semaphore_) {
     ESP_LOGE(TAG, "Failed to create frame ready semaphore");
@@ -84,7 +85,7 @@ bool Tab5Camera::init_camera_() {
     return true;
   }
   
-  // Reset de la caméra si pin disponible
+  // Reset camera if reset pin is available
   if (this->reset_pin_) {
     this->reset_pin_->setup();
     this->reset_pin_->digital_write(false);
@@ -93,10 +94,10 @@ bool Tab5Camera::init_camera_() {
     delay(10);
   }
   
-  // Calcul de la taille du frame buffer
-  this->frame_buffer_size_ = TAB5_CAMERA_H_RES * TAB5_CAMERA_V_RES * 2; // RGB565 = 2 bytes par pixel
+  // Calculate frame buffer size
+  this->frame_buffer_size_ = TAB5_CAMERA_H_RES * TAB5_CAMERA_V_RES * 2; // RGB565 = 2 bytes per pixel
   
-  // Allocation du frame buffer
+  // Allocate frame buffer
   this->frame_buffer_ = heap_caps_malloc(this->frame_buffer_size_, MALLOC_CAP_SPIRAM);
   if (!this->frame_buffer_) {
     ESP_LOGE(TAG, "Failed to allocate frame buffer (%zu bytes)", this->frame_buffer_size_);
@@ -105,7 +106,7 @@ bool Tab5Camera::init_camera_() {
   
   ESP_LOGD(TAG, "Frame buffer allocated: %p, size: %zu bytes", this->frame_buffer_, this->frame_buffer_size_);
   
-  // Configuration du contrôleur CSI
+  // Configure CSI controller
   esp_cam_ctlr_csi_config_t csi_config = {};
   csi_config.ctlr_id = 0;
   csi_config.h_res = TAB5_CAMERA_H_RES;
@@ -123,7 +124,7 @@ bool Tab5Camera::init_camera_() {
     return false;
   }
   
-  // Configuration des callbacks
+  // Configure callbacks
   esp_cam_ctlr_trans_t new_trans = {
     .buffer = this->frame_buffer_,
     .buflen = this->frame_buffer_size_,
@@ -140,14 +141,14 @@ bool Tab5Camera::init_camera_() {
     return false;
   }
   
-  // Activation du contrôleur de caméra
+  // Enable camera controller
   ret = esp_cam_ctlr_enable(this->cam_handle_);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "Failed to enable camera controller: %s", esp_err_to_name(ret));
     return false;
   }
   
-  // Configuration de l'ISP
+  // Configure ISP
   esp_isp_processor_cfg_t isp_config = {};
   isp_config.clk_hz = TAB5_ISP_CLOCK_HZ;
   isp_config.input_data_source = ISP_INPUT_DATA_SOURCE_CSI;
@@ -170,11 +171,11 @@ bool Tab5Camera::init_camera_() {
     return false;
   }
   
-  // Initialisation du frame buffer
+  // Initialize frame buffer
   memset(this->frame_buffer_, 0xFF, this->frame_buffer_size_);
   esp_cache_msync(this->frame_buffer_, this->frame_buffer_size_, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
   
-  // Démarrage de la caméra
+  // Start camera
   ret = esp_cam_ctlr_start(this->cam_handle_);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "Failed to start camera controller: %s", esp_err_to_name(ret));
@@ -214,7 +215,7 @@ void Tab5Camera::deinit_camera_() {
     ESP_LOGD(TAG, "Camera '%s' deinitialized", this->name_.c_str());
   }
   
-  // Nettoyage des objets de synchronisation
+  // Cleanup synchronization objects
   if (this->frame_ready_semaphore_) {
     vSemaphoreDelete(this->frame_ready_semaphore_);
     this->frame_ready_semaphore_ = nullptr;
@@ -237,7 +238,6 @@ bool Tab5Camera::camera_get_finished_trans_callback(esp_cam_ctlr_handle_t handle
   Tab5Camera *camera = static_cast<Tab5Camera*>(user_data);
   
   if (camera->streaming_active_) {
-    // Signal qu'une nouvelle frame est disponible
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     xSemaphoreGiveFromISR(camera->frame_ready_semaphore_, &xHigherPriorityTaskWoken);
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
@@ -281,13 +281,12 @@ bool Tab5Camera::start_streaming() {
   this->streaming_should_stop_ = false;
   this->streaming_active_ = true;
   
-  // Création de la tâche de streaming
   BaseType_t result = xTaskCreate(
     Tab5Camera::streaming_task,
     "tab5_streaming",
     TAB5_STREAMING_STACK_SIZE,
     this,
-    5,  // Priorité élevée pour le streaming
+    5,
     &this->streaming_task_handle_
   );
   
@@ -310,14 +309,11 @@ bool Tab5Camera::stop_streaming() {
   
   this->streaming_should_stop_ = true;
   
-  // Attendre l'arrêt de la tâche
   if (this->streaming_task_handle_) {
-    // Signal pour débloquer la tâche si elle attend
     xSemaphoreGive(this->frame_ready_semaphore_);
     
-    // Attendre la fin de la tâche
     uint32_t timeout = 0;
-    while (this->streaming_active_ && timeout < 50) {  // 5 secondes max
+    while (this->streaming_active_ && timeout < 50) {
       vTaskDelay(100 / portTICK_PERIOD_MS);
       timeout++;
     }
@@ -349,34 +345,27 @@ void Tab5Camera::streaming_loop_() {
   };
   
   while (!this->streaming_should_stop_) {
-    // Capture d'une nouvelle frame
     esp_err_t ret = esp_cam_ctlr_receive(this->cam_handle_, &trans, 100 / portTICK_PERIOD_MS);
     
     if (ret == ESP_OK) {
-      // Synchronisation du cache
       esp_cache_msync(this->frame_buffer_, this->frame_buffer_size_, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
-      
-      // Appel des callbacks
       this->on_frame_callbacks_.call(static_cast<uint8_t*>(this->frame_buffer_), this->frame_buffer_size_);
       
-      // Intégration avec le serveur web ESPHome si configuré
       if (this->web_server_) {
-        // Ici vous pourriez intégrer avec esp32_camera_web_server
-        // Cela nécessiterait des modifications du composant web_server
+        // Web server integration would go here
       }
       
     } else if (ret != ESP_ERR_TIMEOUT) {
       ESP_LOGW(TAG, "Frame capture failed: %s", esp_err_to_name(ret));
-      vTaskDelay(10 / portTICK_PERIOD_MS);  // Pause courte en cas d'erreur
+      vTaskDelay(10 / portTICK_PERIOD_MS);
     }
     
-    // Petite pause pour éviter de surcharger le CPU
     vTaskDelay(1 / portTICK_PERIOD_MS);
   }
   
   this->streaming_active_ = false;
   ESP_LOGD(TAG, "Streaming loop ended for camera '%s'", this->name_.c_str());
-  vTaskDelete(nullptr);  // Supprime la tâche courante
+  vTaskDelete(nullptr);
 }
 #endif
 
