@@ -107,8 +107,8 @@ bool Tab5Camera::init_camera_() {
   };
   
   esp_cam_ctlr_evt_cbs_t cbs = {
-    .on_get_new_trans = Tab5Camera::camera_get_new_vb_callback,
-    .on_trans_finished = Tab5Camera::camera_get_finished_trans_callback,
+    .on_get_new_trans = Tab5Camera::camera_get_new_vb_callback_, 
+    .on_trans_finished = Tab5Camera::camera_get_finished_trans_callback_,
   };
   
   ret = esp_cam_ctlr_register_event_callbacks(this->cam_handle_, &cbs, &new_trans);
@@ -189,14 +189,14 @@ void Tab5Camera::deinit_camera_() {
   }
 }
 
-bool Tab5Camera::camera_get_new_vb_callback(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data) {
+bool Tab5Camera::camera_get_new_vb_callback_(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data) {
   esp_cam_ctlr_trans_t *new_trans = (esp_cam_ctlr_trans_t *)user_data;
   trans->buffer = new_trans->buffer;
   trans->buflen = new_trans->buflen;
   return false;
 }
 
-bool Tab5Camera::camera_get_finished_trans_callback(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data) {
+bool Tab5Camera::camera_get_finished_trans_callback_(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data) {
   return false;
 }
 #endif
