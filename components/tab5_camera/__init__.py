@@ -15,6 +15,7 @@ CODEOWNERS = ["@youkorr"]
 CONF_EXTERNAL_CLOCK = "external_clock"
 CONF_EXTERNAL_CLOCK_PIN = "external_clock_pin"
 CONF_EXTERNAL_CLOCK_FREQUENCY = "external_clock_frequency"
+CONF_AUTO_START_STREAMING = "auto_start_streaming"
 CONF_PIN = "pin"
 
 tab5_camera_ns = cg.esphome_ns.namespace("tab5_camera")
@@ -50,6 +51,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_EXTERNAL_CLOCK_PIN): validate_pin,
     cv.Optional(CONF_EXTERNAL_CLOCK_FREQUENCY): validate_frequency,
     cv.Optional(CONF_RESET_PIN): gpio_output_pin_schema,
+    cv.Optional(CONF_AUTO_START_STREAMING, default=False): cv.boolean,
 }).extend(cv.COMPONENT_SCHEMA)
 
 async def to_code(config):
@@ -84,6 +86,9 @@ async def to_code(config):
     if CONF_RESET_PIN in config:
         reset_pin = await gpio.gpio_pin_expression(config[CONF_RESET_PIN])
         cg.add(var.set_reset_pin(reset_pin))
+    
+    # Configuration de l'auto start streaming
+    cg.add(var.set_auto_start_streaming(config[CONF_AUTO_START_STREAMING]))
 
 
 
