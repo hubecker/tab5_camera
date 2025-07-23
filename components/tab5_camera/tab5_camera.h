@@ -61,6 +61,7 @@ class Tab5Camera : public Component {
  protected:
 #ifdef HAS_ESP32_P4_CAMERA
   bool init_camera_();
+  void deinit_camera_();
   
   
   // Callbacks statiques pour le contrôleur de caméra
