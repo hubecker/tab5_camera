@@ -1,3 +1,5 @@
+
+```
 external_components: 
   - source:
       type: git
@@ -26,3 +28,4 @@ switch:
     on_turn_on:
       - delay: 100ms
       - logger.log: "Camera reset activated" 
+```
