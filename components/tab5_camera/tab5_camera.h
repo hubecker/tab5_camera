@@ -26,7 +26,7 @@
 namespace esphome {
 namespace tab5_camera {
 
-class Tab5Camera : public Component {
+class Tab5Camera : public Component, public i2c::I2CDevice {
  public:
   Tab5Camera() = default;
   ~Tab5Camera();
@@ -40,8 +40,7 @@ class Tab5Camera : public Component {
   void set_external_clock_pin(uint8_t pin) { this->external_clock_pin_ = pin; }
   void set_external_clock_frequency(uint32_t freq) { this->external_clock_frequency_ = freq; }
   void set_reset_pin(GPIOPin *pin) { this->reset_pin_ = pin; }
-  void set_i2c_parent(i2c::I2CComponent *parent) { this->i2c_parent_ = parent; }
-  void set_sensor_address(uint8_t address) { this->sensor_address_ = address; }
+  void set_sensor_address(uint8_t address) { this->sensor_address_ = address; this->set_i2c_address(address); }
 
   // Getters
   const std::string &get_name() const { return this->name_; }
@@ -114,7 +113,6 @@ class Tab5Camera : public Component {
   uint8_t external_clock_pin_{0};
   uint32_t external_clock_frequency_{20000000};  // 20MHz par défaut
   uint8_t sensor_address_{0x24};  // Adresse I2C par défaut du capteur
-  i2c::I2CComponent *i2c_parent_{nullptr};
   GPIOPin *reset_pin_{nullptr};
 
   // Callbacks
@@ -125,6 +123,7 @@ class Tab5Camera : public Component {
 }  // namespace esphome
 
 #endif  // USE_ESP32
+
 
 
 
