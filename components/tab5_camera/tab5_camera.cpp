@@ -42,6 +42,13 @@ void Tab5Camera::setup() {
     return;
   }
   
+  // Configuration du pin de l'horloge externe
+  if (this->external_clock_pin_ > 0) {
+    ESP_LOGD(TAG, "Configuring external clock on GPIO%u at %u Hz", 
+             this->external_clock_pin_, this->external_clock_frequency_);
+    // Ici tu peux ajouter la configuration du GPIO pour l'horloge si nécessaire
+  }
+  
   if (!this->init_camera_()) {
     this->mark_failed();
     return;
@@ -58,8 +65,10 @@ void Tab5Camera::dump_config() {
   ESP_LOGCONFIG(TAG, "Tab5 Camera '%s':", this->name_.c_str());
 #ifdef HAS_ESP32_P4_CAMERA
   ESP_LOGCONFIG(TAG, "  Resolution: %dx%d", TAB5_CAMERA_H_RES, TAB5_CAMERA_V_RES);
-  ESP_LOGCONFIG(TAG, "  External Clock Pin: GPIO%u", this->external_clock_pin_);
-  ESP_LOGCONFIG(TAG, "  External Clock Frequency: %u Hz", this->external_clock_frequency_);
+  if (this->external_clock_pin_ > 0) {
+    ESP_LOGCONFIG(TAG, "  External Clock Pin: GPIO%u", this->external_clock_pin_);
+    ESP_LOGCONFIG(TAG, "  External Clock Frequency: %u Hz", this->external_clock_frequency_);
+  }
   ESP_LOGCONFIG(TAG, "  Frame Buffer Size: %zu bytes", this->frame_buffer_size_);
   ESP_LOGCONFIG(TAG, "  Streaming Support: Available");
   
@@ -85,8 +94,11 @@ bool Tab5Camera::init_camera_() {
     return true;
   }
   
+  ESP_LOGD(TAG, "Initializing camera '%s'...", this->name_.c_str());
+  
   // Reset de la caméra si pin disponible
   if (this->reset_pin_) {
+    ESP_LOGD(TAG, "Executing camera reset sequence");
     this->reset_pin_->setup();
     this->reset_pin_->digital_write(false);
     delay(10);
@@ -193,6 +205,8 @@ void Tab5Camera::deinit_camera_() {
   }
   
   if (this->camera_initialized_) {
+    ESP_LOGD(TAG, "Deinitializing camera '%s'...", this->name_.c_str());
+    
     if (this->cam_handle_) {
       esp_cam_ctlr_stop(this->cam_handle_);
       esp_cam_ctlr_disable(this->cam_handle_);
@@ -253,6 +267,8 @@ bool Tab5Camera::take_snapshot() {
     return false;
   }
   
+  ESP_LOGD(TAG, "Taking snapshot with camera '%s'", this->name_.c_str());
+  
   esp_cam_ctlr_trans_t trans = {
     .buffer = this->frame_buffer_,
     .buflen = this->frame_buffer_size_,
@@ -265,6 +281,13 @@ bool Tab5Camera::take_snapshot() {
   }
   
   ESP_LOGD(TAG, "Camera '%s' snapshot taken, size: %zu bytes", this->name_.c_str(), trans.buflen);
+  
+  // Synchronisation du cache
+  esp_cache_msync(this->frame_buffer_, this->frame_buffer_size_, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+  
+  // Appel des callbacks
+  this->on_frame_callbacks_.call(static_cast<uint8_t*>(this->frame_buffer_), this->frame_buffer_size_);
+  
   return true;
 }
 
@@ -278,6 +301,8 @@ bool Tab5Camera::start_streaming() {
     ESP_LOGW(TAG, "Camera '%s' streaming already active", this->name_.c_str());
     return true;
   }
+  
+  ESP_LOGD(TAG, "Starting streaming for camera '%s'", this->name_.c_str());
   
   this->streaming_should_stop_ = false;
   this->streaming_active_ = true;
@@ -360,12 +385,6 @@ void Tab5Camera::streaming_loop_() {
       // Appel des callbacks
       this->on_frame_callbacks_.call(static_cast<uint8_t*>(this->frame_buffer_), this->frame_buffer_size_);
       
-      // Intégration avec le serveur web ESPHome si configuré
-      if (this->web_server_) {
-        // Ici vous pourriez intégrer avec esp32_camera_web_server
-        // Cela nécessiterait des modifications du composant web_server
-      }
-      
     } else if (ret != ESP_ERR_TIMEOUT) {
       ESP_LOGW(TAG, "Frame capture failed: %s", esp_err_to_name(ret));
       vTaskDelay(10 / portTICK_PERIOD_MS);  // Pause courte en cas d'erreur
@@ -385,6 +404,8 @@ void Tab5Camera::streaming_loop_() {
 }  // namespace esphome
 
 #endif  // USE_ESP32
+
+
 
 
 
