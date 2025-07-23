@@ -30,10 +30,14 @@ class Tab5Camera : public Component {
   void dump_config() override;
   float get_setup_priority() const override;
 
-  // Configuration des pins
+  // Configuration
+  void set_name(const std::string &name) { this->name_ = name; }
   void set_external_clock_pin(uint8_t pin) { this->external_clock_pin_ = pin; }
   void set_external_clock_frequency(uint32_t freq) { this->external_clock_frequency_ = freq; }
   void set_reset_pin(GPIOPin *pin) { this->reset_pin_ = pin; }
+
+  // Getters
+  const std::string &get_name() const { return this->name_; }
 
   // Fonctions de capture
   bool take_snapshot();
@@ -57,12 +61,10 @@ class Tab5Camera : public Component {
     this->on_frame_callbacks_.add(std::move(callback));
   }
 
-
  protected:
 #ifdef HAS_ESP32_P4_CAMERA
   bool init_camera_();
   void deinit_camera_();
-  
   
   // Callbacks statiques pour le contrôleur de caméra
   static bool camera_get_new_vb_callback(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data);
@@ -95,21 +97,20 @@ class Tab5Camera : public Component {
 #endif
 
   // Configuration
+  std::string name_{"Tab5 Camera"};
   uint8_t external_clock_pin_{0};
   uint32_t external_clock_frequency_{20000000};  // 20MHz par défaut
   GPIOPin *reset_pin_{nullptr};
-  std::string name_{"tab5_camera"};
 
   // Callbacks
   CallbackManager<void(uint8_t*, size_t)> on_frame_callbacks_;
-  
-
 };
 
 }  // namespace tab5_camera
 }  // namespace esphome
 
 #endif  // USE_ESP32
+
 
 
 
