@@ -6,6 +6,7 @@ from esphome.const import (
     CONF_NAME,
     CONF_RESET_PIN,
 )
+from esphome.pins import gpio_output_pin_schema
 
 DEPENDENCIES = ["esp32"]
 CODEOWNERS = ["@youkorr"]
@@ -47,7 +48,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_EXTERNAL_CLOCK): EXTERNAL_CLOCK_SCHEMA,
     cv.Optional(CONF_EXTERNAL_CLOCK_PIN): validate_pin,
     cv.Optional(CONF_EXTERNAL_CLOCK_FREQUENCY): validate_frequency,
-    cv.Optional(CONF_RESET_PIN): gpio.gpio_output_pin_schema,
+    cv.Optional(CONF_RESET_PIN): gpio_output_pin_schema,
 }).extend(cv.COMPONENT_SCHEMA)
 
 async def to_code(config):
@@ -57,26 +58,32 @@ async def to_code(config):
     # Configuration du nom
     cg.add(var.set_name(config[CONF_NAME]))
     
-    # Configuration externe clock (nouvelle syntaxe)
+    # Par défaut, utilise GPIO36 et 20MHz si pas spécifié
+    external_clock_pin = 36
+    external_clock_frequency = 20000000
+    
+    # Configuration external_clock (nouvelle syntaxe)
     if CONF_EXTERNAL_CLOCK in config:
         ext_clock = config[CONF_EXTERNAL_CLOCK]
-        pin_num = ext_clock[CONF_PIN]
-        frequency = ext_clock[CONF_FREQUENCY]
-        
-        cg.add(var.set_external_clock_pin(pin_num))
-        cg.add(var.set_external_clock_frequency(frequency))
+        external_clock_pin = ext_clock[CONF_PIN]
+        external_clock_frequency = ext_clock[CONF_FREQUENCY]
     
     # Configuration legacy (ancienne syntaxe)
-    elif CONF_EXTERNAL_CLOCK_PIN in config:
-        cg.add(var.set_external_clock_pin(config[CONF_EXTERNAL_CLOCK_PIN]))
+    if CONF_EXTERNAL_CLOCK_PIN in config:
+        external_clock_pin = config[CONF_EXTERNAL_CLOCK_PIN]
     
     if CONF_EXTERNAL_CLOCK_FREQUENCY in config:
-        cg.add(var.set_external_clock_frequency(config[CONF_EXTERNAL_CLOCK_FREQUENCY]))
+        external_clock_frequency = config[CONF_EXTERNAL_CLOCK_FREQUENCY]
     
-    # Configuration du reset pin  
+    # Applique les configurations
+    cg.add(var.set_external_clock_pin(external_clock_pin))
+    cg.add(var.set_external_clock_frequency(external_clock_frequency))
+    
+    # Configuration du reset pin
     if CONF_RESET_PIN in config:
         reset_pin = await gpio.gpio_pin_expression(config[CONF_RESET_PIN])
         cg.add(var.set_reset_pin(reset_pin))
+
 
 
 
