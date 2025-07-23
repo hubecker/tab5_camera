@@ -56,11 +56,11 @@ void Tab5Camera::setup() {
     return;
   }
   
-  ESP_LOGCONFIG(TAG, "Tab5 Camera setup completed");
+  ESP_LOGCONFIG(TAG, "Tab5 Camera '%s' setup completed", this->name_.c_str());
 }
 
 void Tab5Camera::dump_config() {
-  ESP_LOGCONFIG(TAG, "Tab5 Camera:");
+  ESP_LOGCONFIG(TAG, "Tab5 Camera '%s':", this->name_.c_str());
   ESP_LOGCONFIG(TAG, "  External Clock Pin: GPIO%u", this->external_clock_pin_);
   ESP_LOGCONFIG(TAG, "  External Clock Frequency: %u Hz", this->external_clock_frequency_);
   
@@ -125,7 +125,7 @@ bool Tab5Camera::init_camera_() {
   }
   
   this->camera_initialized_ = true;
-  ESP_LOGD(TAG, "Camera initialized successfully");
+  ESP_LOGD(TAG, "Camera '%s' initialized successfully", this->name_.c_str());
   return true;
 }
 
@@ -133,28 +133,33 @@ void Tab5Camera::deinit_camera_() {
   if (this->camera_initialized_) {
     esp_camera_deinit();
     this->camera_initialized_ = false;
+    ESP_LOGD(TAG, "Camera '%s' deinitialized", this->name_.c_str());
   }
 }
 
-camera::CameraImage *Tab5Camera::snapshot() {
+bool Tab5Camera::take_snapshot() {
   if (!this->camera_initialized_) {
-    ESP_LOGE(TAG, "Camera not initialized");
-    return nullptr;
+    ESP_LOGE(TAG, "Camera '%s' not initialized", this->name_.c_str());
+    return false;
   }
   
   camera_fb_t *fb = esp_camera_fb_get();
   if (!fb) {
-    ESP_LOGW(TAG, "Camera capture failed");
-    return nullptr;
+    ESP_LOGW(TAG, "Camera '%s' capture failed", this->name_.c_str());
+    return false;
   }
   
-  auto *image = new camera::CameraImage(fb->buf, fb->len);
+  ESP_LOGD(TAG, "Camera '%s' snapshot taken, size: %zu bytes", this->name_.c_str(), fb->len);
+  
+  // Ici tu peux traiter l'image ou l'envoyer via un service
+  // Pour l'instant on libère juste le buffer
   esp_camera_fb_return(fb);
   
-  return image;
+  return true;
 }
 
 }  // namespace tab5_camera
 }  // namespace esphome
 
 #endif  // USE_ESP32
+
