@@ -1,7 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import gpio
-from esphome import automation  # Add this line
+from esphome.components.gpio.output import output_pin_expression  # ✅ Correction ici
+from esphome import automation
 from esphome.const import (
     CONF_FREQUENCY,
     CONF_NAME,
@@ -57,38 +57,39 @@ CONFIG_SCHEMA = cv.Schema({
 async def to_code(config):
     var = cg.new_Pvariable(config[cv.GenerateID()])
     await cg.register_component(var, config)
-    
+
     # Configuration du nom
     cg.add(var.set_name(config[CONF_NAME]))
-    
+
     # Par défaut, utilise GPIO36 et 20MHz si pas spécifié
     external_clock_pin = 36
-    external_clock_frequency = 20000000
-    
+    external_clock_frequency = 20_000_000
+
     # Configuration external_clock (nouvelle syntaxe)
     if CONF_EXTERNAL_CLOCK in config:
         ext_clock = config[CONF_EXTERNAL_CLOCK]
         external_clock_pin = ext_clock[CONF_PIN]
         external_clock_frequency = ext_clock[CONF_FREQUENCY]
-    
+
     # Configuration legacy (ancienne syntaxe)
     if CONF_EXTERNAL_CLOCK_PIN in config:
         external_clock_pin = config[CONF_EXTERNAL_CLOCK_PIN]
-    
+
     if CONF_EXTERNAL_CLOCK_FREQUENCY in config:
         external_clock_frequency = config[CONF_EXTERNAL_CLOCK_FREQUENCY]
-    
+
     # Applique les configurations
     cg.add(var.set_external_clock_pin(external_clock_pin))
     cg.add(var.set_external_clock_frequency(external_clock_frequency))
-    
+
     # Configuration du reset pin
     if CONF_RESET_PIN in config:
-        reset_pin = await gpio.output_pin_expression(config[CONF_RESET_PIN])
+        reset_pin = await output_pin_expression(config[CONF_RESET_PIN])
         cg.add(var.set_reset_pin(reset_pin))
-    
+
     # Configuration de l'auto start streaming
     cg.add(var.set_auto_start_streaming(config[CONF_AUTO_START_STREAMING]))
+
 
 
 
