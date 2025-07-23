@@ -84,8 +84,8 @@ async def to_code(config):
     
     # Configuration du reset pin
     if CONF_RESET_PIN in config:
-    reset_pin = await cg.gpio_output_pin_expression(config[CONF_RESET_PIN])
-    cg.add(var.set_reset_pin(reset_pin))
+        reset_pin = await cg.gpio_output_pin_expression(config[CONF_RESET_PIN])
+        cg.add(var.set_reset_pin(reset_pin))
     
     # Configuration de l'auto start streaming
     cg.add(var.set_auto_start_streaming(config[CONF_AUTO_START_STREAMING]))
