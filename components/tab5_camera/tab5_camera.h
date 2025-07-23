@@ -5,12 +5,13 @@
 
 #ifdef USE_ESP32
 
-// Vérification de disponibilité d'esp_camera
-#if __has_include("esp_camera.h")
-#include "esp_camera.h"
-#include "esp_system.h"
-#include "esp_log.h"
-#define HAS_ESP_CAMERA
+// Nouvelle API ESP32-P4
+#if __has_include("esp_cam_ctlr_csi.h")
+#include "esp_cam_ctlr_csi.h"
+#include "esp_cam_ctlr.h"
+#include "driver/isp.h"
+#include "esp_cache.h"
+#define HAS_ESP32_P4_CAMERA
 #endif
 
 namespace esphome {
@@ -30,11 +31,17 @@ class Tab5Camera : public Component {
   bool take_snapshot();
 
  protected:
-#ifdef HAS_ESP_CAMERA
+#ifdef HAS_ESP32_P4_CAMERA
   bool init_camera_();
   void deinit_camera_();
   
-  camera_config_t camera_config_;
+  static bool camera_get_new_vb_callback(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data);
+  static bool camera_get_finished_trans_callback(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data);
+  
+  esp_cam_ctlr_handle_t cam_handle_{nullptr};
+  isp_proc_handle_t isp_proc_{nullptr};
+  void *frame_buffer_{nullptr};
+  size_t frame_buffer_size_{0};
   bool camera_initialized_{false};
 #endif
   
@@ -48,6 +55,7 @@ class Tab5Camera : public Component {
 }  // namespace esphome
 
 #endif  // USE_ESP32
+
 
 
 
