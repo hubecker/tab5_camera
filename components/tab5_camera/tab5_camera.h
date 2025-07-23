@@ -4,7 +4,6 @@
 #include "esphome/core/gpio.h"
 #include "esphome/core/preferences.h"
 
-
 #ifdef USE_ESP32
 
 #ifdef HAS_ESP32_P4_CAMERA
@@ -42,12 +41,17 @@ class Tab5Camera : public Component {
   // Fonctions de streaming
   bool start_streaming();
   bool stop_streaming();
+
+#ifdef HAS_ESP32_P4_CAMERA
   bool is_streaming() const { return this->streaming_active_; }
-  
-  // Accès aux données du frame buffer
   uint8_t* get_frame_buffer() const { return static_cast<uint8_t*>(this->frame_buffer_); }
   size_t get_frame_buffer_size() const { return this->frame_buffer_size_; }
-  
+#else
+  bool is_streaming() const { return false; }
+  uint8_t* get_frame_buffer() const { return nullptr; }
+  size_t get_frame_buffer_size() const { return 0; }
+#endif
+
   // Callbacks pour le streaming
   void add_on_frame_callback(std::function<void(uint8_t*, size_t)> &&callback) {
     this->on_frame_callbacks_.add(std::move(callback));
@@ -105,6 +109,7 @@ class Tab5Camera : public Component {
 }  // namespace esphome
 
 #endif  // USE_ESP32
+
 
 
 
