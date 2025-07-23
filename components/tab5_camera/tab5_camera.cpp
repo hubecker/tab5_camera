@@ -82,18 +82,17 @@ bool Tab5Camera::init_camera_() {
   
   ESP_LOGD(TAG, "Frame buffer allocated: %p, size: %zu bytes", this->frame_buffer_, this->frame_buffer_size_);
   
-  // Configuration du contrôleur CSI
-  esp_cam_ctlr_csi_config_t csi_config = {
-    .ctlr_id = 0,
-    .h_res = TAB5_CAMERA_H_RES,
-    .v_res = TAB5_CAMERA_V_RES,
-    .lane_bit_rate_mbps = TAB5_MIPI_CSI_LANE_BITRATE_MBPS,
-    .input_data_color_type = CAM_CTLR_COLOR_RAW8,
-    .output_data_color_type = CAM_CTLR_COLOR_RGB565,
-    .data_lane_num = 2,
-    .byte_swap_en = false,
-    .queue_items = 1,
-  };
+  // Configuration du contrôleur CSI - ORDRE CORRECT DES CHAMPS
+  esp_cam_ctlr_csi_config_t csi_config = {};
+  csi_config.ctlr_id = 0;
+  csi_config.h_res = TAB5_CAMERA_H_RES;
+  csi_config.v_res = TAB5_CAMERA_V_RES;
+  csi_config.lane_bit_rate_mbps = TAB5_MIPI_CSI_LANE_BITRATE_MBPS;
+  csi_config.input_data_color_type = CAM_CTLR_COLOR_RAW8;
+  csi_config.output_data_color_type = CAM_CTLR_COLOR_RGB565;
+  csi_config.data_lane_num = 2;
+  csi_config.byte_swap_en = false;
+  csi_config.queue_items = 1;
   
   esp_err_t ret = esp_cam_new_csi_ctlr(&csi_config, &this->cam_handle_);
   if (ret != ESP_OK) {
@@ -126,16 +125,15 @@ bool Tab5Camera::init_camera_() {
   }
   
   // Configuration de l'ISP
-  esp_isp_processor_cfg_t isp_config = {
-    .clk_hz = TAB5_ISP_CLOCK_HZ,
-    .input_data_source = ISP_INPUT_DATA_SOURCE_CSI,
-    .input_data_color_type = ISP_COLOR_RAW8,
-    .output_data_color_type = ISP_COLOR_RGB565,
-    .has_line_start_packet = false,
-    .has_line_end_packet = false,
-    .h_res = TAB5_CAMERA_H_RES,
-    .v_res = TAB5_CAMERA_V_RES,
-  };
+  esp_isp_processor_cfg_t isp_config = {};
+  isp_config.clk_hz = TAB5_ISP_CLOCK_HZ;
+  isp_config.input_data_source = ISP_INPUT_DATA_SOURCE_CSI;
+  isp_config.input_data_color_type = ISP_COLOR_RAW8;
+  isp_config.output_data_color_type = ISP_COLOR_RGB565;
+  isp_config.has_line_start_packet = false;
+  isp_config.has_line_end_packet = false;
+  isp_config.h_res = TAB5_CAMERA_H_RES;
+  isp_config.v_res = TAB5_CAMERA_V_RES;
   
   ret = esp_isp_new_processor(&isp_config, &this->isp_proc_);
   if (ret != ESP_OK) {
@@ -170,7 +168,8 @@ void Tab5Camera::deinit_camera_() {
     if (this->cam_handle_) {
       esp_cam_ctlr_stop(this->cam_handle_);
       esp_cam_ctlr_disable(this->cam_handle_);
-      esp_cam_del_csi_ctlr(this->cam_handle_);
+      // CORRECTION: esp_cam_del_csi_ctlr n'existe pas, on utilise esp_cam_ctlr_del
+      esp_cam_ctlr_del(this->cam_handle_);
       this->cam_handle_ = nullptr;
     }
     
@@ -232,6 +231,7 @@ bool Tab5Camera::take_snapshot() {
 }  // namespace esphome
 
 #endif  // USE_ESP32
+
 
 
 
