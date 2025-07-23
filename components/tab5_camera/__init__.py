@@ -1,6 +1,6 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.pins import gpio_output_pin_schema, expression_to_pin
+from esphome.pins import gpio_output_pin_schema
 from esphome import automation
 from esphome.const import (
     CONF_FREQUENCY,
@@ -83,7 +83,7 @@ async def to_code(config):
 
     # Broche de reset
     if CONF_RESET_PIN in config:
-        reset_pin = await expression_to_pin(config[CONF_RESET_PIN])
+        reset_pin = await gpio_output_pin_schema(config[CONF_RESET_PIN])
         cg.add(var.set_reset_pin(reset_pin))
 
     # Démarrage automatique du streaming
