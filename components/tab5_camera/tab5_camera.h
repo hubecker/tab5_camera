@@ -53,10 +53,6 @@ class Tab5Camera : public Component {
     this->on_frame_callbacks_.add(std::move(callback));
   }
 
-  // Configuration pour intégration avec le serveur web
-  void set_web_server(esp32_camera_web_server::ESP32CameraWebServer *web_server) {
-    this->web_server_ = web_server;
-  }
 
  protected:
 #ifdef HAS_ESP32_P4_CAMERA
@@ -102,8 +98,7 @@ class Tab5Camera : public Component {
   // Callbacks
   CallbackManager<void(uint8_t*, size_t)> on_frame_callbacks_;
   
-  // Intégration serveur web
-  esp32_camera_web_server::ESP32CameraWebServer *web_server_{nullptr};
+
 };
 
 }  // namespace tab5_camera
