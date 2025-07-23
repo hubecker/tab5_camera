@@ -3,7 +3,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/gpio.h"
 #include "esphome/core/preferences.h"
-#include "esp32_camera_web_server.h"
+
 
 #ifdef USE_ESP32
 
