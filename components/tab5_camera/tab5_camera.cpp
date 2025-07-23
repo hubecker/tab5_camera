@@ -18,7 +18,9 @@ namespace esphome {
 namespace tab5_camera {
 
 Tab5Camera::~Tab5Camera() {
+#ifdef HAS_ESP32_P4_CAMERA
   this->deinit_camera_();
+#endif
 }
 
 void Tab5Camera::setup() {
