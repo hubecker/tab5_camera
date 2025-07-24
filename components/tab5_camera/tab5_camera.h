@@ -42,8 +42,20 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   void set_reset_pin(GPIOPin *pin) { this->reset_pin_ = pin; }
   void set_sensor_address(uint8_t address) { this->sensor_address_ = address; this->set_i2c_address(address); }
 
+  // Nouveaux paramètres
+  void set_resolution(uint16_t width, uint16_t height) { 
+    this->frame_width_ = width; 
+    this->frame_height_ = height; 
+  }
+  void set_pixel_format(const std::string &format) { this->pixel_format_ = format; }
+  void set_jpeg_quality(uint8_t quality) { this->jpeg_quality_ = quality; }
+
   // Getters
   const std::string &get_name() const { return this->name_; }
+  uint16_t get_frame_width() const { return this->frame_width_; }
+  uint16_t get_frame_height() const { return this->frame_height_; }
+  const std::string &get_pixel_format() const { return this->pixel_format_; }
+  uint8_t get_jpeg_quality() const { return this->jpeg_quality_; }
 
   // Fonctions de capture
   bool take_snapshot();
@@ -114,6 +126,12 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   uint32_t external_clock_frequency_{20000000};  // 20MHz par défaut
   uint8_t sensor_address_{0x24};  // Adresse I2C par défaut du capteur
   GPIOPin *reset_pin_{nullptr};
+
+  // Nouveaux paramètres
+  uint16_t frame_width_{640};
+  uint16_t frame_height_{480};
+  std::string pixel_format_{"YUV422"};
+  uint8_t jpeg_quality_{10};
 
   // Callbacks
   CallbackManager<void(uint8_t*, size_t)> on_frame_callbacks_;
