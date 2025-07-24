@@ -21,6 +21,7 @@ Tab5Camera = tab5_camera_ns.class_("Tab5Camera", cg.Component, i2c.I2CDevice)
 CONF_RESOLUTION = "resolution"
 CONF_PIXEL_FORMAT = "pixel_format"
 CONF_JPEG_QUALITY = "jpeg_quality"
+CONF_FRAMERATE = "framerate"
 CONF_EXTERNAL_CLOCK_PIN = "external_clock_pin"
 CONF_EXTERNAL_CLOCK_FREQUENCY = "external_clock_frequency"
 CONF_RESET_PIN = "reset_pin"
@@ -53,14 +54,15 @@ CONFIG_SCHEMA = cv.All(
         {
             cv.GenerateID(): cv.declare_id(Tab5Camera),
             cv.Optional(CONF_NAME, default="Tab5 Camera"): cv.string,
-            cv.Optional(CONF_EXTERNAL_CLOCK_PIN, default=0): cv.uint8,
-            cv.Optional(CONF_EXTERNAL_CLOCK_FREQUENCY, default=20000000): cv.uint32,
+            cv.Optional(CONF_EXTERNAL_CLOCK_PIN, default=0): cv.int_range(min=0, max=255),
+            cv.Optional(CONF_EXTERNAL_CLOCK_FREQUENCY, default=20000000): cv.positive_int,
             cv.Optional(CONF_RESET_PIN): pins.gpio_output_pin_schema,
             cv.Optional(CONF_SENSOR_ADDRESS, default=0x24): cv.i2c_address,
             # Nouveaux paramètres
             cv.Optional(CONF_RESOLUTION, default="VGA"): validate_resolution,
             cv.Optional(CONF_PIXEL_FORMAT, default="YUV422"): cv.one_of(*PIXEL_FORMATS.keys(), upper=True),
             cv.Optional(CONF_JPEG_QUALITY, default=10): cv.int_range(min=1, max=63),
+            cv.Optional(CONF_FRAMERATE, default=15): cv.int_range(min=1, max=60),
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
@@ -89,6 +91,9 @@ async def to_code(config):
     
     # Qualité JPEG
     cg.add(var.set_jpeg_quality(config[CONF_JPEG_QUALITY]))
+    
+    # Framerate
+    cg.add(var.set_framerate(config[CONF_FRAMERATE]))
 
     # Pin de reset (optionnel)
     if CONF_RESET_PIN in config:
@@ -97,7 +102,6 @@ async def to_code(config):
 
     # Defines nécessaires pour ESP32-P4
     cg.add_define("USE_ESP32")
-
 
 
 
