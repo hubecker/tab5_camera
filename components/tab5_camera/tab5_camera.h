@@ -49,6 +49,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   }
   void set_pixel_format(const std::string &format) { this->pixel_format_ = format; }
   void set_jpeg_quality(uint8_t quality) { this->jpeg_quality_ = quality; }
+  void set_framerate(uint8_t framerate) { this->framerate_ = framerate; }
 
   // Getters
   const std::string &get_name() const { return this->name_; }
@@ -56,6 +57,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   uint16_t get_frame_height() const { return this->frame_height_; }
   const std::string &get_pixel_format() const { return this->pixel_format_; }
   uint8_t get_jpeg_quality() const { return this->jpeg_quality_; }
+  uint8_t get_framerate() const { return this->framerate_; }
 
   // Fonctions de capture
   bool take_snapshot();
@@ -132,6 +134,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   uint16_t frame_height_{480};
   std::string pixel_format_{"YUV422"};
   uint8_t jpeg_quality_{10};
+  uint8_t framerate_{15};
 
   // Callbacks
   CallbackManager<void(uint8_t*, size_t)> on_frame_callbacks_;
