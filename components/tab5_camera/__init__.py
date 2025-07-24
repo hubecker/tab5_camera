@@ -23,7 +23,6 @@ CONF_PIXEL_FORMAT = "pixel_format"
 CONF_JPEG_QUALITY = "jpeg_quality"
 CONF_FRAMERATE = "framerate"
 CONF_EXTERNAL_CLOCK_PIN = "external_clock_pin"
-CONF_EXTERNAL_CLOCK_FREQUENCY = "external_clock_frequency"
 CONF_RESET_PIN = "reset_pin"
 CONF_SENSOR_ADDRESS = "sensor_address"
 
@@ -55,7 +54,7 @@ CONFIG_SCHEMA = cv.All(
             cv.GenerateID(): cv.declare_id(Tab5Camera),
             cv.Optional(CONF_NAME, default="Tab5 Camera"): cv.string,
             cv.Optional(CONF_EXTERNAL_CLOCK_PIN, default=0): cv.int_range(min=0, max=255),
-            cv.Optional(CONF_EXTERNAL_CLOCK_FREQUENCY, default=20000000): cv.positive_int,
+            cv.Optional(CONF_FREQUENCY, default=20000000): cv.positive_int,
             cv.Optional(CONF_RESET_PIN): pins.gpio_output_pin_schema,
             cv.Optional(CONF_SENSOR_ADDRESS, default=0x24): cv.i2c_address,
             # Nouveaux paramètres
@@ -77,7 +76,7 @@ async def to_code(config):
     # Configuration de base
     cg.add(var.set_name(config[CONF_NAME]))
     cg.add(var.set_external_clock_pin(config[CONF_EXTERNAL_CLOCK_PIN]))
-    cg.add(var.set_external_clock_frequency(config[CONF_EXTERNAL_CLOCK_FREQUENCY]))
+    cg.add(var.set_external_clock_frequency(config[CONF_FREQUENCY]))
     cg.add(var.set_sensor_address(config[CONF_SENSOR_ADDRESS]))
 
     # Nouveaux paramètres
