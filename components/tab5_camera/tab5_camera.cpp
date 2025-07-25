@@ -3,7 +3,8 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/hal.h"
 #include "esp_timer.h"
-
+#include "esp_cam_sensor_types.h"
+#include "sc202cs_types.h"
 
 
 #ifdef USE_ESP32
@@ -28,8 +29,12 @@ this->deinit_camera_();
 
 // Fonction helper pour écrire dans un registre I2C
 bool Tab5Camera::write_sensor_register_(uint16_t reg, uint8_t value) {
-  uint8_t data[3] = {(uint8_t)(reg >> 8), (uint8_t)(reg & 0xFF), value};
-  return this->write_bytes_raw(data, 3);
+  // Alternative 1: Utiliser write_byte si disponible
+  if (!this->write_byte(reg >> 8) || !this->write_byte(reg & 0xFF) || !this->write_byte(value)) {
+    ESP_LOGE(TAG, "Failed to write register 0x%04X = 0x%02X", reg, value);
+    return false;
+  }
+  return true;
 }
 
 // Fonction pour forcer le mode RAW8 du capteur
@@ -390,7 +395,6 @@ vTaskDelete(nullptr);
 
 #endif  // HAS_ESP32_P4_CAMERA
 #endif  // USE_ESP32
-
 
 
 
