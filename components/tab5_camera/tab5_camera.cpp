@@ -26,34 +26,19 @@ Tab5Camera::~Tab5Camera() {
 this->deinit_camera_();
 }
 
+// Fonction helper pour écrire dans un registre I2C
 bool Tab5Camera::write_sensor_register_(uint16_t reg, uint8_t value) {
-  uint8_t data[3];
-  data[0] = (reg >> 8) & 0xFF;  // MSB
-  data[1] = reg & 0xFF;         // LSB
-  data[2] = value;
-
-  if (!this->write(data, 3)) {
+  // Utilisation des méthodes I2C d'ESPHome pour envoyer: reg_high, reg_low, value
+  uint8_t reg_high = (reg >> 8) & 0xFF;
+  uint8_t reg_low = reg & 0xFF;
+  
+  if (!this->write_byte(reg_high) || !this->write_byte(reg_low) || !this->write_byte(value)) {
     ESP_LOGE(TAG, "Failed to write register 0x%04X = 0x%02X", reg, value);
     return false;
   }
+  ESP_LOGD(TAG, "Write register 0x%04X = 0x%02X", reg, value);
   return true;
 }
-
-bool Tab5Camera::read_sensor_register_(uint16_t reg, uint8_t *value) {
-  uint8_t reg_data[2] = { uint8_t(reg >> 8), uint8_t(reg & 0xFF) };
-  if (!this->write(reg_data, 2, false)) {  // false = pas de stop
-    ESP_LOGE(TAG, "Failed to set register address for read: 0x%04X", reg);
-    return false;
-  }
-
-  if (!this->read(value, 1)) {
-    ESP_LOGE(TAG, "Failed to read register 0x%04X", reg);
-    return false;
-  }
-
-  return true;
-}
-
 
 // Fonction pour forcer le mode RAW8 du capteur
 void Tab5Camera::force_sensor_raw8_mode() {
@@ -114,7 +99,20 @@ float Tab5Camera::get_setup_priority() const {
 return setup_priority::HARDWARE - 1.0f;
 }
 
-
+bool Tab5Camera::init_ldo_() {
+if (this->ldo_initialized_) return true;
+ESP_LOGI(TAG, "Initializing MIPI LDO regulator");
+esp_ldo_channel_config_t ldo_mipi_phy_config = {
+    .chan_id = 3,
+    .voltage_mv = 2500,
+};
+esp_err_t ret = esp_ldo_acquire_channel(&ldo_mipi_phy_config, &this->ldo_mipi_phy_);
+if (ret != ESP_OK) {
+  ESP_LOGW(TAG, "Failed to acquire MIPI LDO channel: %s. Some boards may not need this.", esp_err_to_name(ret));
+}
+this->ldo_initialized_ = true;
+return true;
+}
 
 bool Tab5Camera::init_sensor_() {
 if (this->sensor_initialized_) return true;
@@ -140,7 +138,7 @@ return true;
 bool Tab5Camera::init_camera_() {
 if (this->camera_initialized_) return true;
 
-
+if (!this->init_ldo_()) return false;
 if (!this->init_sensor_()) return false;
 
 // Calcul de la taille de buffer
