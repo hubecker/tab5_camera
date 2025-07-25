@@ -595,52 +595,48 @@ void Tab5Camera::streaming_task(void *parameter) {
 
 // BOUCLE DE STREAMING SIMPLIFIÉE (basée sur l'exemple officiel)
 void Tab5Camera::streaming_loop_() {
-  ESP_LOGD(TAG, "Streaming loop started for camera '%s'", this->name_.c_str());
-  
-  esp_cam_ctlr_trans_t trans = {
-    .buffer = this->frame_buffer_,
-    .buflen = this->frame_buffer_size_,
-  };
-  
-  uint32_t frame_count = 0;
-  
-  while (!this->streaming_should_stop_) {
-    // BOUCLE SIMPLE comme dans l'exemple officiel
-    esp_err_t ret = esp_cam_ctlr_receive(this->cam_handle_, &trans, ESP_CAM_CTLR_MAX_DELAY);
+    ESP_LOGD(TAG, "Streaming loop started for camera '%s'", this->name_.c_str());
     
-    if (ret == ESP_OK) {
-      frame_count++;
-      
-      // Synchronisation du cache
-      esp_cache_msync(this->frame_buffer_, trans.buflen, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
-      
-      // Appel des callbacks
-      this->on_frame_callbacks_.call(static_cast<uint8_t*>(this->frame_buffer_), trans.buflen);
-      
-      // Debug périodique
-      if (frame_count % 100 == 0) {
-        ESP_LOGD(TAG, "Frames captured: %lu, last frame size: %zu bytes", frame_count, trans.buflen);
-      }
-      
-      // Réinitialiser la transaction
-      trans.buffer = this->frame_buffer_;
-      trans.buflen = this->frame_buffer_size_;
-      
-    } else {
-      ESP_LOGW(TAG, "Frame capture failed: %s", esp
-      
-    } else if (ret != ESP_ERR_TIMEOUT) {
-      ESP_LOGW(TAG, "Frame capture failed: %s", esp_err_to_name(ret));
-      vTaskDelay(10 / portTICK_PERIOD_MS);  // Pause courte en cas d'erreur
+    esp_cam_ctlr_trans_t trans = {
+        .buffer = this->frame_buffer_,
+        .buflen = this->frame_buffer_size_,
+    };
+    
+    uint32_t frame_count = 0;
+    
+    while (!this->streaming_should_stop_) {
+        esp_err_t ret = esp_cam_ctlr_receive(this->cam_handle_, &trans, ESP_CAM_CTLR_MAX_DELAY);
+        
+        if (ret == ESP_OK) {
+            frame_count++;
+            
+            // Synchronisation du cache
+            esp_cache_msync(this->frame_buffer_, trans.buflen, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+            
+            // Appel des callbacks
+            this->on_frame_callbacks_.call(static_cast<uint8_t*>(this->frame_buffer_), trans.buflen);
+            
+            // Debug périodique
+            if (frame_count % 100 == 0) {
+                ESP_LOGD(TAG, "Frames captured: %lu, last frame size: %zu bytes", frame_count, trans.buflen);
+            }
+            
+            // Réinitialiser la transaction
+            trans.buffer = this->frame_buffer_;
+            trans.buflen = this->frame_buffer_size_;
+            
+        } else if (ret != ESP_ERR_TIMEOUT) {
+            ESP_LOGW(TAG, "Frame capture failed: %s", esp_err_to_name(ret));
+            vTaskDelay(10 / portTICK_PERIOD_MS);  // Pause courte en cas d'erreur
+        }
+        
+        // Petite pause pour éviter de surcharger le CPU
+        vTaskDelay(1 / portTICK_PERIOD_MS);
     }
     
-    // Petite pause pour éviter de surcharger le CPU
-    vTaskDelay(1 / portTICK_PERIOD_MS);
-  }
-  
-  this->streaming_active_ = false;
-  ESP_LOGD(TAG, "Streaming loop ended for camera '%s'", this->name_.c_str());
-  vTaskDelete(nullptr);  // Supprime la tâche courante
+    this->streaming_active_ = false;
+    ESP_LOGD(TAG, "Streaming loop ended for camera '%s'", this->name_.c_str());
+    vTaskDelete(nullptr);  // Supprime la tâche courante
 }
 #endif
 
