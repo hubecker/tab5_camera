@@ -136,6 +136,9 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   bool init_ldo_();
   void deinit_camera_();
 
+  bool write_sensor_register_(uint16_t reg, uint8_t value);
+  void force_sensor_raw8_mode();
+
 
   // Configuration du capteur
   bool configure_sensor_();
