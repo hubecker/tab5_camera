@@ -22,8 +22,7 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "freertos/queue.h"
-#include "esp_cam_sensor_types.h"
-#include "sc202cs_types.h"
+
 
 
 // Vérification des versions IDF
