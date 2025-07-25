@@ -9,7 +9,7 @@ from esphome.const import (
 )
 from esphome import pins
 
-CODEOWNERS = ["@your-username"]
+CODEOWNERS = ["@youkorr"]
 DEPENDENCIES = ["i2c"]
 MULTI_CONF = True
 
@@ -39,6 +39,7 @@ PIXEL_FORMATS = {
     "RAW10": "RAW10",
     "YUV422": "YUV422",
     "RGB565": "RGB565",
+    "JPEG": "JPEG",
 }
 
 def validate_resolution(value):
@@ -58,7 +59,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_SENSOR_ADDRESS, default=0x24): cv.i2c_address,
             # Nouveaux paramètres
             cv.Optional(CONF_RESOLUTION, default="VGA"): validate_resolution,
-            cv.Optional(CONF_PIXEL_FORMAT, default="RAW8"): cv.one_of(*PIXEL_FORMATS.keys(), upper=True),
+            cv.Optional(CONF_PIXEL_FORMAT, default="JPEG"): cv.one_of(*PIXEL_FORMATS.keys(), upper=True),
             cv.Optional(CONF_JPEG_QUALITY, default=10): cv.int_range(min=1, max=63),
             cv.Optional(CONF_FRAMERATE, default=15): cv.int_range(min=1, max=60),
         }
