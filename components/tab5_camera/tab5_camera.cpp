@@ -2,6 +2,7 @@
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/hal.h"
+#include "esp_timer.h"
 
 #ifdef USE_ESP32
 
