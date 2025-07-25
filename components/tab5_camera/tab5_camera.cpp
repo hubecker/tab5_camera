@@ -166,58 +166,30 @@ bool Tab5Camera::init_sensor_() {
   return true;
 }
 
-bool Tab5Camera::init_camera_() {
-  if (this->camera_initialized_) {
-    ESP_LOGI(TAG, "Camera already initialized, skipping");
-    return true;
-  }
+// Étape 4: Allocation du frame buffer
+ESP_LOGI(TAG, "Step 2.4: Allocating frame buffer");
+
+this->frame_buffer_size_ = TAB5_CAMERA_H_RES * TAB5_CAMERA_V_RES * 2; // RGB565 = 2 bytes par pixel
+
+// Aligner la taille sur 64 octets
+this->frame_buffer_size_ = (this->frame_buffer_size_ + 63) & ~63;
+
+ESP_LOGI(TAG, "Aligned frame buffer size: %zu bytes", this->frame_buffer_size_);
+
+// Allocation alignée 64 octets
+this->frame_buffer_ = heap_caps_aligned_alloc(64, this->frame_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+
+if (!this->frame_buffer_) {
+  ESP_LOGE(TAG, "Failed to allocate aligned frame buffer (%zu bytes) - trying regular RAM", this->frame_buffer_size_);
   
-  ESP_LOGI(TAG, "Starting camera initialization for '%s'", this->name_.c_str());
+  this->frame_buffer_ = heap_caps_aligned_alloc(64, this->frame_buffer_size_, MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
   
-  // Étape 1: Initialisation du LDO MIPI
-  ESP_LOGI(TAG, "Step 2.1: Initializing MIPI LDO");
-  if (!this->init_ldo_()) {
-    ESP_LOGE(TAG, "Failed to initialize MIPI LDO");
-    return false;
-  }
-  ESP_LOGI(TAG, "MIPI LDO initialized successfully");
-  
-  // Étape 2: Reset de la caméra si pin disponible
-  if (this->reset_pin_) {
-    ESP_LOGI(TAG, "Step 2.2: Executing camera reset sequence");
-    this->reset_pin_->setup();
-    this->reset_pin_->digital_write(false);
-    delayMicroseconds(10000);  // 10ms
-    this->reset_pin_->digital_write(true);
-    delayMicroseconds(10000);  // 10ms
-    ESP_LOGI(TAG, "Camera reset completed");
-  } else {
-    ESP_LOGI(TAG, "Step 2.2: No reset pin configured, skipping reset");
-  }
-  
-  // Étape 3: Initialisation du capteur I2C
-  ESP_LOGI(TAG, "Step 2.3: Initializing camera sensor");
-  if (!this->init_sensor_()) {
-    ESP_LOGE(TAG, "Failed to initialize camera sensor");
-    return false;
-  }
-  ESP_LOGI(TAG, "Camera sensor initialized successfully");
-  
-  // Étape 4: Allocation du frame buffer
-  ESP_LOGI(TAG, "Step 2.4: Allocating frame buffer");
-  this->frame_buffer_size_ = TAB5_CAMERA_H_RES * TAB5_CAMERA_V_RES * 2; // RGB565 = 2 bytes par pixel
-  ESP_LOGI(TAG, "Calculated frame buffer size: %zu bytes", this->frame_buffer_size_);
-  
-  this->frame_buffer_ = heap_caps_malloc(this->frame_buffer_size_, MALLOC_CAP_SPIRAM);
   if (!this->frame_buffer_) {
-    ESP_LOGE(TAG, "Failed to allocate frame buffer (%zu bytes) - trying regular RAM", this->frame_buffer_size_);
-    // Essayer avec la RAM normale si SPIRAM échoue
-    this->frame_buffer_ = heap_caps_malloc(this->frame_buffer_size_, MALLOC_CAP_DMA);
-    if (!this->frame_buffer_) {
-      ESP_LOGE(TAG, "Failed to allocate frame buffer in regular RAM also");
-      return false;
-    }
+    ESP_LOGE(TAG, "Failed to allocate frame buffer in regular RAM also");
+    return false;
   }
+}
+
   
   ESP_LOGI(TAG, "Frame buffer allocated: %p, size: %zu bytes", this->frame_buffer_, this->frame_buffer_size_);
   
