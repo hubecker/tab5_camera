@@ -42,7 +42,8 @@ enum class PixelFormat {
   RAW8,
   RAW10,
   YUV422,
-  RGB565
+  RGB565,
+  JPEG
 };
 
 enum class CameraResolution {
@@ -181,7 +182,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   
   // Configuration des buffers
   static constexpr size_t FRAME_QUEUE_SIZE = 3;
-  static constexpr size_t FRAME_BUFFER_COUNT = 2;
+  static constexpr size_t FRAME_BUFFER_COUNT = 1;
   static constexpr uint32_t STREAMING_TASK_STACK_SIZE = 4096;
   static constexpr UBaseType_t STREAMING_TASK_PRIORITY = 5;
 #endif
@@ -196,7 +197,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   // Paramètres de caméra
   uint16_t frame_width_{640};
   uint16_t frame_height_{480};
-  std::string pixel_format_{"RAW8"};
+  std::string pixel_format_{"JPEG"};
   uint8_t jpeg_quality_{10};
   uint8_t framerate_{15};
 
