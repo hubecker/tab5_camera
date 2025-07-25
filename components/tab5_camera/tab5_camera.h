@@ -66,22 +66,22 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   void set_external_clock_pin(uint8_t pin) { this->external_clock_pin_ = pin; }
   void set_external_clock_frequency(uint32_t freq) { this->external_clock_frequency_ = freq; }
   void set_reset_pin(GPIOPin *pin) { this->reset_pin_ = pin; }
-  void set_sensor_address(uint8_t address) { 
-    this->sensor_address_ = address; 
-    this->set_i2c_address(address); 
+  void set_sensor_address(uint8_t address) {
+    this->sensor_address_ = address;
+    this->set_i2c_address(address);
   }
 
   // Nouveaux paramètres
-  void set_resolution(uint16_t width, uint16_t height) { 
-    this->frame_width_ = width; 
-    this->frame_height_ = height; 
+  void set_resolution(uint16_t width, uint16_t height) {
+    this->frame_width_ = width;
+    this->frame_height_ = height;
   }
   void set_pixel_format(const std::string &format) { this->pixel_format_ = format; }
-  void set_jpeg_quality(uint8_t quality) { 
-    this->jpeg_quality_ = std::max(static_cast<uint8_t>(1), std::min(quality, static_cast<uint8_t>(63))); 
+  void set_jpeg_quality(uint8_t quality) {
+    this->jpeg_quality_ = std::max(static_cast<uint8_t>(1), std::min(quality, static_cast<uint8_t>(63)));
   }
-  void set_framerate(uint8_t framerate) { 
-    this->framerate_ = std::max(static_cast<uint8_t>(1), std::min(framerate, static_cast<uint8_t>(60))); 
+  void set_framerate(uint8_t framerate) {
+    this->framerate_ = std::max(static_cast<uint8_t>(1), std::min(framerate, static_cast<uint8_t>(60)));
   }
 
   // Getters
@@ -94,7 +94,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
 
   // Fonctions de capture
   bool take_snapshot();
-  
+
   // Fonctions de streaming
   bool start_streaming();
   bool stop_streaming();
@@ -103,7 +103,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   bool is_streaming() const { return this->streaming_active_; }
   uint8_t* get_frame_buffer() const { return static_cast<uint8_t*>(this->frame_buffer_); }
   size_t get_frame_buffer_size() const { return this->frame_buffer_size_; }
-  
+
   // Fonctions spécifiques ESP32-P4
   bool init_camera_controller();
   bool init_isp_processor();
@@ -112,7 +112,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   bool is_streaming() const { return false; }
   uint8_t* get_frame_buffer() const { return nullptr; }
   size_t get_frame_buffer_size() const { return 0; }
-  
+
   // Stubs pour compatibilité
   bool init_camera_controller() { return false; }
   bool init_isp_processor() { return false; }
@@ -135,46 +135,45 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   bool init_sensor_();
   bool init_ldo_();
   void deinit_camera_();
-  
-  
+
+
   // Configuration du capteur
   bool configure_sensor_();
   bool reset_sensor_();
   bool write_sensor_register_(uint16_t reg, uint8_t value);
   bool read_sensor_register_(uint16_t reg, uint8_t *value);
-  
+
   // Callbacks statiques pour le contrôleur de caméra
   static bool IRAM_ATTR camera_get_new_vb_callback(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data);
   static bool IRAM_ATTR camera_get_finished_trans_callback(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data);
-  
+
   // Tâche de streaming
   static void streaming_task(void *parameter);
   void streaming_loop_();
-  
+
   // Variables ESP32-P4
   esp_cam_ctlr_handle_t cam_handle_{nullptr};
-  isp_proc_handle_t isp_proc_{nullptr};  // CORRECTION: Était mal nommé dans l'impl
+  isp_proc_handle_t isp_proc_{nullptr};
   esp_ldo_channel_handle_t ldo_mipi_phy_{nullptr};
   i2c_master_bus_handle_t i2c_bus_handle_{nullptr};
   void *frame_buffer_{nullptr};
   size_t frame_buffer_size_{0};
-  
-  // AJOUT: Variable manquante utilisée dans l'implémentation
+
   esp_cam_ctlr_trans_t cam_trans_{};
-  
+
   // États d'initialisation
   bool camera_initialized_{false};
   bool sensor_initialized_{false};
   bool ldo_initialized_{false};
   bool i2c_initialized_{false};
-  
+
   // Variables de streaming
   TaskHandle_t streaming_task_handle_{nullptr};
   SemaphoreHandle_t frame_ready_semaphore_{nullptr};
   QueueHandle_t frame_queue_{nullptr};
   bool streaming_active_{false};
   bool streaming_should_stop_{false};
-  
+
   // Structure pour les frames en queue
   struct FrameData {
     void* buffer;
@@ -182,7 +181,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
     uint32_t timestamp;
     bool valid;
   };
-  
+
   // Configuration des buffers
   static constexpr size_t FRAME_QUEUE_SIZE = 3;
   static constexpr size_t FRAME_BUFFER_COUNT = 2;
@@ -207,21 +206,28 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   // Gestion des erreurs
   bool error_state_{false};
   std::string last_error_{""};
-  
+
   // Callbacks
   CallbackManager<void(uint8_t*, size_t)> on_frame_callbacks_;
-  
+
   // Méthodes utilitaires
   void set_error_(const std::string &error);
   void clear_error_();
   PixelFormat parse_pixel_format_(const std::string &format);
   size_t calculate_frame_size_() const;
+
+#ifdef HAS_ESP32_P4_CAMERA
+  // Fonctions de diagnostic
+  void diagnose_csi_status_();
+  void run_full_diagnostic_();
+#endif
 };
 
 }  // namespace tab5_camera
 }  // namespace esphome
 
 #endif  // USE_ESP32
+
 
 
 
