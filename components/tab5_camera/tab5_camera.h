@@ -3,7 +3,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/gpio.h"
 #include "esphome/core/preferences.h"
-
+#include "esphome/components/i2c/i2c.h"
 
 #ifdef USE_ESP32
 
@@ -22,8 +22,7 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "freertos/queue.h"
-
-
+#include "driver/i2c_master.h"
 
 // Vérification des versions IDF
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 1, 0)
@@ -68,8 +67,8 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   void set_external_clock_frequency(uint32_t freq) { this->external_clock_frequency_ = freq; }
   void set_reset_pin(GPIOPin *pin) { this->reset_pin_ = pin; }
   void set_sensor_address(uint8_t address) {
-    
-   
+    this->sensor_address_ = address;
+    this->set_i2c_address(address);
   }
 
   // Nouveaux paramètres
@@ -134,7 +133,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   // Fonctions d'initialisation
   bool init_camera_();
   bool init_sensor_();
-  
+  bool init_ldo_();
   void deinit_camera_();
 
   bool write_sensor_register_(uint16_t reg, uint8_t value);
@@ -156,8 +155,8 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   // Variables ESP32-P4
   esp_cam_ctlr_handle_t cam_handle_{nullptr};
   isp_proc_handle_t isp_proc_{nullptr};
-  
-  
+  esp_ldo_channel_handle_t ldo_mipi_phy_{nullptr};
+  i2c_master_bus_handle_t i2c_bus_handle_{nullptr};
   void *frame_buffer_{nullptr};
   size_t frame_buffer_size_{0};
 
@@ -166,8 +165,8 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   // États d'initialisation
   bool camera_initialized_{false};
   bool sensor_initialized_{false};
- 
- 
+  bool ldo_initialized_{false};
+  bool i2c_initialized_{false};
 
   // Variables de streaming
   TaskHandle_t streaming_task_handle_{nullptr};
@@ -195,7 +194,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   std::string name_{"Tab5 Camera"};
   uint8_t external_clock_pin_{0};
   uint32_t external_clock_frequency_{20000000};  // 20MHz par défaut
-  
+  uint8_t sensor_address_{0x24};  // Adresse I2C par défaut du capteur
   GPIOPin *reset_pin_{nullptr};
 
   // Paramètres de caméra
@@ -229,7 +228,6 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
 }  // namespace esphome
 
 #endif  // USE_ESP32
-
 
 
 
