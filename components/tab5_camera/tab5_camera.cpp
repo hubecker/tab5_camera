@@ -139,14 +139,14 @@ ESP_LOGI(TAG, "DMA buffers allocated successfully.");
 // Configuration du contrôleur CSI
 esp_cam_ctlr_csi_config_t csi_config = {
     .ctlr_id = 0,
+    .queue_items = FRAME_BUFFER_COUNT, // IMPORTANT: Doit correspondre au nombre de tampons
     .h_res = this->frame_width_,
     .v_res = this->frame_height_,
     .data_lane_num = 2,
     .lane_bit_rate_mbps = TAB5_MIPI_CSI_LANE_BITRATE_MBPS,
     .input_data_color_type = CAM_CTLR_COLOR_RAW8, // Le capteur sort du RAW
     .output_data_color_type = CAM_CTLR_COLOR_YUV422, // L'ISP convertit en YUV422
-    .byte_swap_en = false,
-    .queue_items = FRAME_BUFFER_COUNT, // IMPORTANT: Doit correspondre au nombre de tampons
+    .byte_swap_en = false
 };
 
 esp_err_t ret = esp_cam_new_csi_ctlr(&csi_config, &this->cam_handle_);
