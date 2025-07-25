@@ -67,7 +67,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   void set_external_clock_frequency(uint32_t freq) { this->external_clock_frequency_ = freq; }
   void set_reset_pin(GPIOPin *pin) { this->reset_pin_ = pin; }
   void set_sensor_address(uint8_t address) {
-    this->sensor_address_ = address;
+    
     this->set_i2c_address(address);
   }
 
