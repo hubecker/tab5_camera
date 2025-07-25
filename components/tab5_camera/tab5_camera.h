@@ -1,14 +1,5 @@
 #pragma once
 
-// Définir les macros AVANT tous les includes
-#ifndef USE_ESP32
-#define USE_ESP32 1
-#endif
-
-#ifndef LWIP_IPV6
-#define LWIP_IPV6 1
-#endif
-
 #include "esphome/core/component.h"
 #include "esphome/core/gpio.h"
 #include "esphome/core/preferences.h"
@@ -227,6 +218,10 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
 }  // namespace esphome
 
 #endif  // USE_ESP32
+
+
+
+
 
 
 
