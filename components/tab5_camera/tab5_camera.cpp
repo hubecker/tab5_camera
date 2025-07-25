@@ -147,7 +147,7 @@ csi_config.lane_bit_rate_mbps = TAB5_MIPI_CSI_LANE_BITRATE_MBPS;
 csi_config.input_data_color_type = CAM_CTLR_COLOR_RAW8; // Le capteur sort du RAW
 csi_config.output_data_color_type = CAM_CTLR_COLOR_YUV422; // L'ISP convertit en YUV422
 csi_config.byte_swap_en = false;
-csi_config.queue_items = FRAME_BUFFER_COUNT; // IMPORTANT: Doit correspondre au nombre de tampons
+csi_config.queue_items = FRAME_BUFFER_COUNT + 2; // Augmenter légèrement la taille de la file pour éviter les timeouts
 
 esp_err_t ret = esp_cam_new_csi_ctlr(&csi_config, &this->cam_handle_);
 if (ret != ESP_OK) {
@@ -263,20 +263,25 @@ if (this->streaming_active_) {
 ESP_LOGI(TAG, "Starting streaming...");
 this->streaming_should_stop_ = false;
 
-// Fournir tous les tampons au pilote pour qu'il puisse commencer à les remplir
-for (int i = 0; i < FRAME_BUFFER_COUNT; i++) {
-  esp_err_t ret = esp_cam_ctlr_receive(this->cam_handle_, &transactions_[i], 0);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to queue buffer %d: %s", i, esp_err_to_name(ret));
-    return false;
-  }
-}
-
-// Démarrer le contrôleur
+// IMPORTANT: Démarrer le contrôleur AVANT d'envoyer les tampons
 esp_err_t ret = esp_cam_ctlr_start(this->cam_handle_);
 if (ret != ESP_OK) {
   ESP_LOGE(TAG, "Failed to start camera controller: %s", esp_err_to_name(ret));
   return false;
+}
+
+// Maintenant fournir les tampons au pilote avec un délai entre chaque
+for (int i = 0; i < FRAME_BUFFER_COUNT; i++) {
+  ret = esp_cam_ctlr_receive(this->cam_handle_, &transactions_[i], pdMS_TO_TICKS(100));
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to queue buffer %d: %s", i, esp_err_to_name(ret));
+    // Arrêter le contrôleur en cas d'échec
+    esp_cam_ctlr_stop(this->cam_handle_);
+    return false;
+  }
+  ESP_LOGD(TAG, "Queued buffer %d successfully", i);
+  // Petit délai pour laisser le temps au système de traiter
+  vTaskDelay(pdMS_TO_TICKS(10));
 }
 
 // Créer la tâche de traitement des images
