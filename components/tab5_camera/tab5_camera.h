@@ -190,7 +190,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   std::string name_{"Tab5 Camera"};
   uint8_t external_clock_pin_{0};
   uint32_t external_clock_frequency_{20000000};  // 20MHz par défaut
-  uint8_t sensor_address_{0x24};  // Adresse I2C par défaut du capteur
+  uint8_t sensor_address_{0x3C};  // Adresse I2C par défaut du capteur
   GPIOPin *reset_pin_{nullptr};
 
   // Paramètres de caméra
