@@ -44,8 +44,6 @@ void Tab5Camera::setup() {
     return;
   }
   
-
-  
   ESP_LOGCONFIG(TAG, "Tab5 Camera '%s' setup completed successfully", this->name_.c_str());
 #else
   ESP_LOGE(TAG, "ESP32-P4 MIPI-CSI API not available - Tab5 Camera component disabled");
@@ -100,7 +98,9 @@ float Tab5Camera::get_setup_priority() const {
 
 #ifdef HAS_ESP32_P4_CAMERA
 
-  
+// Diagnostic CSI - maintenant correctement dans la classe
+void Tab5Camera::diagnose_csi_status_() {
+  ESP_LOGI(TAG, "=== CSI DIAGNOSTIC START ===");
   
   if (!this->cam_handle_) {
     ESP_LOGE(TAG, "❌ CSI controller handle is null");
@@ -146,13 +146,12 @@ float Tab5Camera::get_setup_priority() const {
 
 // Diagnostic complet
 void Tab5Camera::run_full_diagnostic_() {
+  ESP_LOGI(TAG, "🔍 Starting full diagnostic");
   
-  
-  
-  // 2. Diagnostic CSI
+  // 1. Diagnostic CSI
   this->diagnose_csi_status_();
   
-  // 3. Test de mémoire
+  // 2. Test de mémoire
   ESP_LOGI(TAG, "Memory diagnostic:");
   ESP_LOGI(TAG, "  Free heap: %lu bytes", esp_get_free_heap_size());
   ESP_LOGI(TAG, "  Free PSRAM: %lu bytes", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
@@ -606,13 +605,13 @@ void Tab5Camera::streaming_loop_() {
     ESP_LOGD(TAG, "Streaming loop ended for camera '%s'", this->name_.c_str());
     vTaskDelete(nullptr);  // Supprime la tâche courante
 }
-#endif
+
+#endif  // HAS_ESP32_P4_CAMERA
 
 }  // namespace tab5_camera
 }  // namespace esphome
 
 #endif  // USE_ESP32
-
 
 
 
