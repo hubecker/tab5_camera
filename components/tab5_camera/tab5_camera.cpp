@@ -136,18 +136,18 @@ for (int i = 0; i < FRAME_BUFFER_COUNT; i++) {
 }
 ESP_LOGI(TAG, "DMA buffers allocated successfully.");
 
-// Configuration du contrôleur CSI - FIXED: Reordered fields to match declaration order
-esp_cam_ctlr_csi_config_t csi_config = {
-    .ctlr_id = 0,
-    .data_lane_num = 2,
-    .lane_bit_rate_mbps = TAB5_MIPI_CSI_LANE_BITRATE_MBPS,
-    .input_data_color_type = CAM_CTLR_COLOR_RAW8, // Le capteur sort du RAW
-    .output_data_color_type = CAM_CTLR_COLOR_YUV422, // L'ISP convertit en YUV422
-    .h_res = this->frame_width_,
-    .v_res = this->frame_height_,
-    .byte_swap_en = false,
-    .queue_items = FRAME_BUFFER_COUNT, // IMPORTANT: Doit correspondre au nombre de tampons
-};
+// Configuration du contrôleur CSI - Using alternative initialization method to avoid field order issues
+esp_cam_ctlr_csi_config_t csi_config;
+memset(&csi_config, 0, sizeof(csi_config));
+csi_config.ctlr_id = 0;
+csi_config.h_res = this->frame_width_;
+csi_config.v_res = this->frame_height_;
+csi_config.data_lane_num = 2;
+csi_config.lane_bit_rate_mbps = TAB5_MIPI_CSI_LANE_BITRATE_MBPS;
+csi_config.input_data_color_type = CAM_CTLR_COLOR_RAW8; // Le capteur sort du RAW
+csi_config.output_data_color_type = CAM_CTLR_COLOR_YUV422; // L'ISP convertit en YUV422
+csi_config.byte_swap_en = false;
+csi_config.queue_items = FRAME_BUFFER_COUNT; // IMPORTANT: Doit correspondre au nombre de tampons
 
 esp_err_t ret = esp_cam_new_csi_ctlr(&csi_config, &this->cam_handle_);
 if (ret != ESP_OK) {
