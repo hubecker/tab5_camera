@@ -68,6 +68,21 @@ void Tab5Camera::setup() {
   this->mark_failed();
 #endif
 }
+void Tab5Camera::streaming_task() {
+  this->log("Streaming loop started for camera '%s'", this->name_.c_str());
+
+  while (this->is_streaming_) {
+    if (xSemaphoreTake(this->frame_ready_semaphore_, pdMS_TO_TICKS(1000))) {
+
+      esp_cam_ctlr_receive(this->cam_handle_, &this->current_frame_, portMAX_DELAY);
+    } else {
+      ESP_LOGW(TAG, "No frame received in time");
+    }
+  }
+
+  this->log("Streaming task exiting");
+  vTaskDelete(nullptr);
+}
 
 void Tab5Camera::dump_config() {
   ESP_LOGCONFIG(TAG, "Tab5 Camera '%s':", this->name_.c_str());
