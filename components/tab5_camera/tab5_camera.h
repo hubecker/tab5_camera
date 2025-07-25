@@ -183,8 +183,8 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   };
 
   // Configuration des buffers
-  static constexpr size_t FRAME_QUEUE_SIZE = 3;
-  static constexpr size_t FRAME_BUFFER_COUNT = 2;
+  static constexpr size_t FRAME_QUEUE_SIZE = 5;
+  static constexpr size_t FRAME_BUFFER_COUNT = 4;
   static constexpr uint32_t STREAMING_TASK_STACK_SIZE = 4096;
   static constexpr UBaseType_t STREAMING_TASK_PRIORITY = 5;
 #endif
