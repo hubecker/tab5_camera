@@ -44,8 +44,7 @@ void Tab5Camera::setup() {
     return;
   }
   
-  // Diagnostic complet
-  this->run_full_diagnostic_();
+
   
   ESP_LOGCONFIG(TAG, "Tab5 Camera '%s' setup completed successfully", this->name_.c_str());
 #else
@@ -105,7 +104,7 @@ float Tab5Camera::get_setup_priority() const {
 
 // Fonction de diagnostic CSI
 void Tab5Camera::diagnose_csi_status_() {
-  ESP_LOGI(TAG, "=== CSI DIAGNOSTIC START ===");
+  
   
   if (!this->cam_handle_) {
     ESP_LOGE(TAG, "❌ CSI controller handle is null");
@@ -151,7 +150,7 @@ void Tab5Camera::diagnose_csi_status_() {
 
 // Diagnostic complet
 void Tab5Camera::run_full_diagnostic_() {
-  ESP_LOGI(TAG, "🔍 Running full camera diagnostic...");
+  
   
   // 1. Diagnostic I2C
   this->diagnose_i2c_connection_();
