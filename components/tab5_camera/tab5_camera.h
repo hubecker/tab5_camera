@@ -139,11 +139,9 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   bool write_sensor_register_(uint16_t reg, uint8_t value);
   void force_sensor_raw8_mode();
 
-
   // Configuration du capteur
   bool configure_sensor_();
   bool reset_sensor_();
-  bool write_sensor_register_(uint16_t reg, uint8_t value);
   bool read_sensor_register_(uint16_t reg, uint8_t *value);
 
   // Callbacks statiques pour le contrôleur de caméra
@@ -230,7 +228,6 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
 }  // namespace esphome
 
 #endif  // USE_ESP32
-
 
 
 
