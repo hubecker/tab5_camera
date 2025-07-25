@@ -11,7 +11,6 @@ from esphome import pins
 
 CODEOWNERS = ["@your-username"]
 DEPENDENCIES = ["i2c"]
-
 MULTI_CONF = True
 
 tab5_camera_ns = cg.esphome_ns.namespace("tab5_camera")
@@ -69,16 +68,20 @@ CONFIG_SCHEMA = cv.All(
 )
 
 async def to_code(config):
+    # Définir les macros AVANT tout autre code
+    cg.add_define("USE_ESP32", "1")
+    cg.add_define("LWIP_IPV6", "1") 
+    
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await i2c.register_i2c_device(var, config)
-
+    
     # Configuration de base
     cg.add(var.set_name(config[CONF_NAME]))
     cg.add(var.set_external_clock_pin(config[CONF_EXTERNAL_CLOCK_PIN]))
     cg.add(var.set_external_clock_frequency(config[CONF_FREQUENCY]))
     cg.add(var.set_sensor_address(config[CONF_SENSOR_ADDRESS]))
-
+    
     # Nouveaux paramètres
     # Résolution
     resolution_str = config[CONF_RESOLUTION]
@@ -93,14 +96,11 @@ async def to_code(config):
     
     # Framerate
     cg.add(var.set_framerate(config[CONF_FRAMERATE]))
-
+    
     # Pin de reset (optionnel)
     if CONF_RESET_PIN in config:
         reset_pin = await cg.gpio_pin_expression(config[CONF_RESET_PIN])
         cg.add(var.set_reset_pin(reset_pin))
-
-    # Defines nécessaires pour ESP32-P4
-    cg.add_define("USE_ESP32")
 
 
 
