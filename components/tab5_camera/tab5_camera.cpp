@@ -139,12 +139,12 @@ bool Tab5Camera::init_camera_() {
   // Configuration du contrôleur CSI
   esp_cam_ctlr_csi_config_t csi_config = {
       .ctlr_id = 0,
+      .lane_bit_rate_mbps = TAB5_MIPI_CSI_LANE_BITRATE_MBPS,
+      .data_lane_num = 2,
       .h_res = this->frame_width_,
       .v_res = this->frame_height_,
-      .lane_bit_rate_mbps = TAB5_MIPI_CSI_LANE_BITRATE_MBPS,
       .input_data_color_type = CAM_CTLR_COLOR_RAW8, // Le capteur sort du RAW
       .output_data_color_type = CAM_CTLR_COLOR_YUV422, // L'ISP convertit en YUV422
-      .data_lane_num = 2,
       .byte_swap_en = false,
       .queue_items = FRAME_BUFFER_COUNT, // IMPORTANT: Doit correspondre au nombre de tampons
   };
@@ -265,7 +265,7 @@ bool Tab5Camera::start_streaming() {
 
   // Fournir tous les tampons au pilote pour qu'il puisse commencer à les remplir
   for (int i = 0; i < FRAME_BUFFER_COUNT; i++) {
-    esp_err_t ret = esp_cam_ctlr_receive(this->cam_handle_, &transactions_[i]);
+    esp_err_t ret = esp_cam_ctlr_receive(this->cam_handle_, &transactions_[i], 0);
     if (ret != ESP_OK) {
       ESP_LOGE(TAG, "Failed to queue buffer %d: %s", i, esp_err_to_name(ret));
       return false;
@@ -348,7 +348,7 @@ void Tab5Camera::streaming_loop_() {
     this->on_frame_callbacks_.call((uint8_t *) trans->buffer, trans->buflen);
 
     // Renvoyer le tampon au pilote pour qu'il puisse être réutilisé
-    esp_err_t ret = esp_cam_ctlr_receive(this->cam_handle_, trans);
+    esp_err_t ret = esp_cam_ctlr_receive(this->cam_handle_, trans, 0);
     if (ret != ESP_OK) {
       ESP_LOGE(TAG, "Failed to re-queue buffer: %s", esp_err_to_name(ret));
     }
@@ -363,6 +363,7 @@ void Tab5Camera::streaming_loop_() {
 
 #endif  // HAS_ESP32_P4_CAMERA
 #endif  // USE_ESP32
+
 
 
 
