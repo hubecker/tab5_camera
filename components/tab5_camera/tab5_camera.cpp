@@ -98,8 +98,67 @@ float Tab5Camera::get_setup_priority() const {
 
 #ifdef HAS_ESP32_P4_CAMERA
 
+// Diagnostic CSI - maintenant correctement dans la classe
+void Tab5Camera::diagnose_csi_status_() {
+  ESP_LOGI(TAG, "=== CSI DIAGNOSTIC START ===");
+  
+  if (!this->cam_handle_) {
+    ESP_LOGE(TAG, "❌ CSI controller handle is null");
+    return;
+  }
+  
+  ESP_LOGI(TAG, "CSI Controller Handle: %p", this->cam_handle_);
+  ESP_LOGI(TAG, "Frame Buffer Address: %p", this->frame_buffer_);
+  ESP_LOGI(TAG, "Frame Buffer Size: %zu bytes", this->frame_buffer_size_);
+  ESP_LOGI(TAG, "Expected Resolution: %dx%d", TAB5_CAMERA_H_RES, TAB5_CAMERA_V_RES);
+  
+  // Test de capture unique pour diagnostic
+  esp_cam_ctlr_trans_t test_trans = {
+    .buffer = this->frame_buffer_,
+    .buflen = this->frame_buffer_size_,
+  };
+  
+  ESP_LOGI(TAG, "Testing single frame capture...");
+  esp_err_t ret = esp_cam_ctlr_receive(this->cam_handle_, &test_trans, 2000 / portTICK_PERIOD_MS);
+  
+  if (ret == ESP_OK) {
+    ESP_LOGI(TAG, "✅ Single frame capture successful");
+    ESP_LOGI(TAG, "   Captured size: %zu bytes", test_trans.buflen);
+    
+    // Vérifier si on a des données non nulles
+    uint32_t non_zero_count = 0;
+    uint8_t *buffer = static_cast<uint8_t*>(this->frame_buffer_);
+    for (size_t i = 0; i < std::min(test_trans.buflen, (size_t)1000); i++) {
+      if (buffer[i] != 0) non_zero_count++;
+    }
+    ESP_LOGI(TAG, "   Non-zero bytes in first 1000: %lu", non_zero_count);
+    
+    if (non_zero_count == 0) {
+      ESP_LOGW(TAG, "⚠️  Frame buffer contains only zeros - sensor may not be producing data");
+    }
+    
+  } else {
+    ESP_LOGE(TAG, "❌ Single frame capture failed: %s", esp_err_to_name(ret));
+  }
+  
+  ESP_LOGI(TAG, "=== CSI DIAGNOSTIC END ===");
+}
 
-
+// Diagnostic complet
+void Tab5Camera::run_full_diagnostic_() {
+  ESP_LOGI(TAG, "🔍 Starting full diagnostic");
+  
+  // 1. Diagnostic CSI
+  this->diagnose_csi_status_();
+  
+  // 2. Test de mémoire
+  ESP_LOGI(TAG, "Memory diagnostic:");
+  ESP_LOGI(TAG, "  Free heap: %lu bytes", esp_get_free_heap_size());
+  ESP_LOGI(TAG, "  Free PSRAM: %lu bytes", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+  ESP_LOGI(TAG, "  Minimum free heap: %lu bytes", esp_get_minimum_free_heap_size());
+  
+  ESP_LOGI(TAG, "🔍 Diagnostic completed");
+}
 
 bool Tab5Camera::init_ldo_() {
   if (this->ldo_initialized_) {
