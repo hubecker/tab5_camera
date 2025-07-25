@@ -39,6 +39,20 @@ bool Tab5Camera::write_sensor_register_(uint16_t reg, uint8_t value) {
   return true;
 }
 
+bool Tab5Camera::read_sensor_register_(uint16_t reg, uint8_t *value) {
+  uint8_t reg_data[2] = { uint8_t(reg >> 8), uint8_t(reg & 0xFF) };
+  if (!this->write(reg_data, 2, false)) {  // false = pas de stop
+    ESP_LOGE(TAG, "Failed to set register address for read: 0x%04X", reg);
+    return false;
+  }
+
+  if (!this->read(value, 1)) {
+    ESP_LOGE(TAG, "Failed to read register 0x%04X", reg);
+    return false;
+  }
+
+  return true;
+}
 
 
 // Fonction pour forcer le mode RAW8 du capteur
