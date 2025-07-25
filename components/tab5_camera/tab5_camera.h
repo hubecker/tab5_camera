@@ -23,6 +23,7 @@
 #include "freertos/semphr.h"
 #include "freertos/queue.h"
 #include "driver/i2c_master.h"
+#include "esphome/components/i2c/i2c.h"
 
 // Vérification des versions IDF
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 1, 0)
@@ -128,6 +129,8 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   bool has_error() const { return this->error_state_; }
   const std::string &get_last_error() const { return this->last_error_; }
 
+ private:
+  esphome::i2c::I2CDevice i2c_dev_;
  protected:
 #ifdef HAS_ESP32_P4_CAMERA
   // Fonctions d'initialisation
