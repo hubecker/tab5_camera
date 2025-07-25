@@ -230,7 +230,7 @@ bool Tab5Camera::init_camera_() {
   ESP_LOGI(TAG, "Frame buffer allocated successfully at %p", this->frame_buffer_);
 
   return true;
-}
+  }
 
   
   
