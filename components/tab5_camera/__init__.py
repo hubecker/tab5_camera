@@ -68,9 +68,7 @@ CONFIG_SCHEMA = cv.All(
 )
 
 async def to_code(config):
-    # Définir les macros AVANT tout autre code
-    cg.add_define("USE_ESP32", "1")
-    cg.add_define("LWIP_IPV6", "1") 
+
     
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
