@@ -105,20 +105,17 @@ float Tab5Camera::get_setup_priority() const {
 bool Tab5Camera::diagnose_i2c_connection_() {
   ESP_LOGI(TAG, "=== I2C DIAGNOSTIC START ===");
   
-  // Test de scan I2C sur la plage normale des capteurs
-  bool device_found = false;
-  for (uint8_t addr = 0x20; addr <= 0x7F; addr++) {
-    uint8_t dummy;
-    if (this->read_byte_raw(addr, 0x00, &dummy)) {
-      ESP_LOGI(TAG, "I2C device found at address 0x%02X", addr);
-      device_found = true;
-      
-      // Si c'est notre adresse configurée
-      if (addr == this->address_) {
-        ESP_LOGI(TAG, "✅ Target sensor found at configured address 0x%02X", addr);
-      }
-    }
+  uint8_t dummy;
+  ErrorCode err = this->read_register(0x00, &dummy, 1);
+  
+  if (err == ERROR_OK) {
+    ESP_LOGI(TAG, "✅ Target sensor found at address 0x%02X", this->address_);
+    return true;
+  } else {
+    ESP_LOGE(TAG, "❌ No response from sensor at address 0x%02X", this->address_);
+    return false;
   }
+}
   
   if (!device_found) {
     ESP_LOGE(TAG, "❌ No I2C devices found - check wiring and power");
