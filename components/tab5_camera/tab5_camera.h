@@ -3,7 +3,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/gpio.h"
 #include "esphome/core/preferences.h"
-#include "esphome/components/i2c/i2c.h"
+
 
 #ifdef USE_ESP32
 
@@ -68,7 +68,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   void set_reset_pin(GPIOPin *pin) { this->reset_pin_ = pin; }
   void set_sensor_address(uint8_t address) {
     
-    this->set_i2c_address(address);
+   
   }
 
   // Nouveaux paramètres
@@ -133,7 +133,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   // Fonctions d'initialisation
   bool init_camera_();
   bool init_sensor_();
-  bool init_ldo_();
+  
   void deinit_camera_();
 
   bool write_sensor_register_(uint16_t reg, uint8_t value);
@@ -155,7 +155,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   // Variables ESP32-P4
   esp_cam_ctlr_handle_t cam_handle_{nullptr};
   isp_proc_handle_t isp_proc_{nullptr};
-  esp_ldo_channel_handle_t ldo_mipi_phy_{nullptr};
+  
   
   void *frame_buffer_{nullptr};
   size_t frame_buffer_size_{0};
@@ -165,8 +165,8 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   // États d'initialisation
   bool camera_initialized_{false};
   bool sensor_initialized_{false};
-  bool ldo_initialized_{false};
-  bool i2c_initialized_{false};
+ 
+ 
 
   // Variables de streaming
   TaskHandle_t streaming_task_handle_{nullptr};
