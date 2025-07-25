@@ -114,20 +114,7 @@ float Tab5Camera::get_setup_priority() const {
 return setup_priority::HARDWARE - 1.0f;
 }
 
-bool Tab5Camera::init_ldo_() {
-if (this->ldo_initialized_) return true;
-ESP_LOGI(TAG, "Initializing MIPI LDO regulator");
-esp_ldo_channel_config_t ldo_mipi_phy_config = {
-    .chan_id = 3,
-    .voltage_mv = 2500,
-};
-esp_err_t ret = esp_ldo_acquire_channel(&ldo_mipi_phy_config, &this->ldo_mipi_phy_);
-if (ret != ESP_OK) {
-  ESP_LOGW(TAG, "Failed to acquire MIPI LDO channel: %s. Some boards may not need this.", esp_err_to_name(ret));
-}
-this->ldo_initialized_ = true;
-return true;
-}
+
 
 bool Tab5Camera::init_sensor_() {
 if (this->sensor_initialized_) return true;
