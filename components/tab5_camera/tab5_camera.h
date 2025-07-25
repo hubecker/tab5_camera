@@ -156,7 +156,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   esp_cam_ctlr_handle_t cam_handle_{nullptr};
   isp_proc_handle_t isp_proc_{nullptr};
   esp_ldo_channel_handle_t ldo_mipi_phy_{nullptr};
-  i2c_master_bus_handle_t i2c_bus_handle_{nullptr};
+  
   void *frame_buffer_{nullptr};
   size_t frame_buffer_size_{0};
 
