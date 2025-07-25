@@ -140,7 +140,7 @@ return true;
 bool Tab5Camera::init_camera_() {
 if (this->camera_initialized_) return true;
 
-if (!this->init_ldo_()) return false;
+
 if (!this->init_sensor_()) return false;
 
 // Calcul de la taille de buffer
