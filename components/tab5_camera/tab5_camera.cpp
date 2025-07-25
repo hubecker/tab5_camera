@@ -100,10 +100,6 @@ float Tab5Camera::get_setup_priority() const {
 
 #ifdef HAS_ESP32_P4_CAMERA
 
-
-
-// Fonction de diagnostic CSI
-void Tab5Camera::diagnose_csi_status_() {
   
   
   if (!this->cam_handle_) {
@@ -152,8 +148,6 @@ void Tab5Camera::diagnose_csi_status_() {
 void Tab5Camera::run_full_diagnostic_() {
   
   
-  // 1. Diagnostic I2C
-  this->diagnose_i2c_connection_();
   
   // 2. Diagnostic CSI
   this->diagnose_csi_status_();
