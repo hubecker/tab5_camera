@@ -136,10 +136,6 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   bool init_ldo_();
   void deinit_camera_();
   
-  // AJOUT: Méthodes de diagnostic manquantes
-  bool diagnose_i2c_connection_();
-  void diagnose_csi_status_();
-  void run_full_diagnostic_();
   
   // Configuration du capteur
   bool configure_sensor_();
