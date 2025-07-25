@@ -463,7 +463,7 @@ bool Tab5Camera::start_streaming() {
     return true;
   }
 
-  esp_cam_ctlr_receive(this->cam_handle_, &this->current_frame_, portMAX_DELAY);
+  
   ESP_LOGD(TAG, "Starting streaming for camera '%s'", this->name_.c_str());
   
   this->streaming_should_stop_ = false;
