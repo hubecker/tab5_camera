@@ -380,16 +380,31 @@ bool Tab5Camera::camera_get_new_vb_callback(esp_cam_ctlr_handle_t handle, esp_ca
 
 bool Tab5Camera::camera_get_finished_trans_callback(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data) {
   Tab5Camera *camera = static_cast<Tab5Camera*>(user_data);
-  
-  if (camera->streaming_active_) {
-    // Signal qu'une nouvelle frame est disponible
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    xSemaphoreGiveFromISR(camera->frame_ready_semaphore_, &xHigherPriorityTaskWoken);
-    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+  if (!camera) {
+    ESP_LOGE(TAG, "camera_get_finished_trans_callback called with null user_data");
+    return false;
   }
+
+  // On crée une structure FrameData contenant les infos nécessaires
+  FrameData frame;
+  frame.buffer = camera->frame_buffer_;
+  frame.size = camera->frame_buffer_size_;
+  frame.timestamp = esp_timer_get_time();  // Optionnel, timestamp en microsecondes
   
+  // On essaie de mettre la frame dans la queue (non bloquant)
+  BaseType_t ret = xQueueSendFromISR(camera->frame_queue_, &frame, NULL);
+  if (ret == pdTRUE) {
+    // On signale qu'une frame est prête via le sémaphore (release)
+    xSemaphoreGiveFromISR(camera->frame_ready_semaphore_, NULL);
+  } else {
+    // Queue pleine, on perd la frame (il faudrait envisager un overwrite si c'est critique)
+    ESP_LOGW(TAG, "Frame queue full, dropping frame");
+  }
+
+  // Retourne false pour indiquer qu'on ne garde pas la possession exclusive de la buffer (selon doc IDF)
   return false;
 }
+
 
 bool Tab5Camera::take_snapshot() {
   if (!this->camera_initialized_) {
