@@ -136,6 +136,11 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   bool init_ldo_();
   void deinit_camera_();
   
+  // AJOUT: Méthodes de diagnostic manquantes
+  bool diagnose_i2c_connection_();
+  void diagnose_csi_status_();
+  void run_full_diagnostic_();
+  
   // Configuration du capteur
   bool configure_sensor_();
   bool reset_sensor_();
@@ -152,11 +157,14 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   
   // Variables ESP32-P4
   esp_cam_ctlr_handle_t cam_handle_{nullptr};
-  isp_proc_handle_t isp_proc_{nullptr};
+  isp_proc_handle_t isp_proc_{nullptr};  // CORRECTION: Était mal nommé dans l'impl
   esp_ldo_channel_handle_t ldo_mipi_phy_{nullptr};
   i2c_master_bus_handle_t i2c_bus_handle_{nullptr};
   void *frame_buffer_{nullptr};
   size_t frame_buffer_size_{0};
+  
+  // AJOUT: Variable manquante utilisée dans l'implémentation
+  esp_cam_ctlr_trans_t cam_trans_{};
   
   // États d'initialisation
   bool camera_initialized_{false};
@@ -218,7 +226,6 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
 }  // namespace esphome
 
 #endif  // USE_ESP32
-
 
 
 
