@@ -3,8 +3,7 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/hal.h"
 #include "esp_timer.h"
-#include "esp_cam_sensor_types.h"
-#include "sc202cs_types.h"
+
 
 
 #ifdef USE_ESP32
@@ -27,6 +26,25 @@ Tab5Camera::~Tab5Camera() {
 this->deinit_camera_();
 }
 
+// Fonction helper pour écrire dans un registre I2C
+bool Tab5Camera::write_sensor_register_(uint16_t reg, uint8_t value) {
+  uint8_t data[3] = {(uint8_t)(reg >> 8), (uint8_t)(reg & 0xFF), value};
+  return this->write_bytes_raw(data, 3);
+}
+
+// Fonction pour forcer le mode RAW8 du capteur
+void Tab5Camera::force_sensor_raw8_mode() {
+  ESP_LOGI(TAG, "Configuring sensor for RAW8 mode...");
+  
+  // Séquence I2C minimale pour forcer le RAW8 (souvent capteurs SmartSens)
+  // Tu peux adapter selon le datasheet ou ton init_reglist
+  this->write_sensor_register_(0x3013, 0x01);  // Soft reset (si besoin)
+  delay(10);
+  this->write_sensor_register_(0x302A, 0x00);  // RAW8 mode
+  this->write_sensor_register_(0x0100, 0x01);  // Start streaming
+  
+  ESP_LOGI(TAG, "Sensor configured for RAW8 mode");
+}
 
 void Tab5Camera::setup() {
 ESP_LOGCONFIG(TAG, "Setting up Tab5 Camera with ESP32-P4 MIPI-CSI...");
@@ -101,8 +119,8 @@ if (this->reset_pin_) {
   delay(10);
 }
 
-// TODO: Ajouter ici la séquence de configuration I2C spécifique à votre capteur.
-// Exemple: write_sensor_register_(0x3008, 0x88);
+// Configuration du capteur en mode RAW8
+this->force_sensor_raw8_mode();
 
 this->sensor_initialized_ = true;
 ESP_LOGI(TAG, "Camera sensor initialized");
