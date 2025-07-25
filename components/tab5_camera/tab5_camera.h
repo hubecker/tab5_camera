@@ -196,7 +196,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   // Paramètres de caméra
   uint16_t frame_width_{640};
   uint16_t frame_height_{480};
-  std::string pixel_format_{"YUV422"};
+  std::string pixel_format_{"RAW8"};
   uint8_t jpeg_quality_{10};
   uint8_t framerate_{15};
 
