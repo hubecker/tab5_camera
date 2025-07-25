@@ -28,17 +28,21 @@ this->deinit_camera_();
 
 // Fonction helper pour écrire dans un registre I2C
 bool Tab5Camera::write_sensor_register_(uint16_t reg, uint8_t value) {
-  // Utilisation des méthodes I2C d'ESPHome pour envoyer: reg_high, reg_low, value
+  // Séparation du registre 16 bits en deux octets
   uint8_t reg_high = (reg >> 8) & 0xFF;
   uint8_t reg_low = reg & 0xFF;
-  
-  if (!this->write_byte(reg_high) || !this->write_byte(reg_low) || !this->write_byte(value)) {
+
+  // Envoi de la séquence complète [reg_high, reg_low, value] via I2C
+  uint8_t data[3] = {reg_high, reg_low, value};
+  if (!this->i2c_dev_.write(data, 3)) {
     ESP_LOGE(TAG, "Failed to write register 0x%04X = 0x%02X", reg, value);
     return false;
   }
+
   ESP_LOGD(TAG, "Write register 0x%04X = 0x%02X", reg, value);
   return true;
 }
+
 
 // Fonction pour forcer le mode RAW8 du capteur
 void Tab5Camera::force_sensor_raw8_mode() {
