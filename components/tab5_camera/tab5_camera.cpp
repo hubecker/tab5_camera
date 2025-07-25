@@ -171,9 +171,9 @@ bool Tab5Camera::init_camera_() {
     ESP_LOGI(TAG, "Camera already initialized, skipping");
     return true;
   }
-  
+
   ESP_LOGI(TAG, "Starting camera initialization for '%s'", this->name_.c_str());
-  
+
   // Étape 1: Initialisation du LDO MIPI
   ESP_LOGI(TAG, "Step 2.1: Initializing MIPI LDO");
   if (!this->init_ldo_()) {
@@ -181,7 +181,7 @@ bool Tab5Camera::init_camera_() {
     return false;
   }
   ESP_LOGI(TAG, "MIPI LDO initialized successfully");
-  
+
   // Étape 2: Reset de la caméra si pin disponible
   if (this->reset_pin_) {
     ESP_LOGI(TAG, "Step 2.2: Executing camera reset sequence");
@@ -194,7 +194,7 @@ bool Tab5Camera::init_camera_() {
   } else {
     ESP_LOGI(TAG, "Step 2.2: No reset pin configured, skipping reset");
   }
-  
+
   // Étape 3: Initialisation du capteur I2C
   ESP_LOGI(TAG, "Step 2.3: Initializing camera sensor");
   if (!this->init_sensor_()) {
@@ -202,24 +202,38 @@ bool Tab5Camera::init_camera_() {
     return false;
   }
   ESP_LOGI(TAG, "Camera sensor initialized successfully");
-  
+
   // Étape 4: Allocation du frame buffer
   ESP_LOGI(TAG, "Step 2.4: Allocating frame buffer");
+
+  // Calcul de la taille réelle requise
   this->frame_buffer_size_ = TAB5_CAMERA_H_RES * TAB5_CAMERA_V_RES * 2; // RGB565 = 2 bytes par pixel
-  ESP_LOGI(TAG, "Calculated frame buffer size: %zu bytes", this->frame_buffer_size_);
-  
-  this->frame_buffer_ = heap_caps_malloc(this->frame_buffer_size_, MALLOC_CAP_SPIRAM);
+
+  // Arrondi sur un multiple de 64 (cache line size)
+  this->frame_buffer_size_ = (this->frame_buffer_size_ + 63) & ~63;
+
+  ESP_LOGI(TAG, "Aligned frame buffer size: %zu bytes", this->frame_buffer_size_);
+
+  // Allocation alignée en PSRAM
+  this->frame_buffer_ = heap_caps_aligned_alloc(64, this->frame_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!this->frame_buffer_) {
-    ESP_LOGE(TAG, "Failed to allocate frame buffer (%zu bytes) - trying regular RAM", this->frame_buffer_size_);
-    // Essayer avec la RAM normale si SPIRAM échoue
-    this->frame_buffer_ = heap_caps_malloc(this->frame_buffer_size_, MALLOC_CAP_DMA);
+    ESP_LOGE(TAG, "Failed to allocate aligned frame buffer in PSRAM (%zu bytes) - trying regular RAM", this->frame_buffer_size_);
+
+    // Essai avec RAM normale
+    this->frame_buffer_ = heap_caps_aligned_alloc(64, this->frame_buffer_size_, MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
     if (!this->frame_buffer_) {
-      ESP_LOGE(TAG, "Failed to allocate frame buffer in regular RAM also");
+      ESP_LOGE(TAG, "Failed to allocate aligned frame buffer in regular RAM also");
       return false;
     }
   }
+
+  ESP_LOGI(TAG, "Frame buffer allocated successfully at %p", this->frame_buffer_);
+
+  return true;
+}
+
   
-  ESP_LOGI(TAG, "Frame buffer allocated: %p, size: %zu bytes", this->frame_buffer_, this->frame_buffer_size_);
+  
   
   // Étape 5: Configuration du contrôleur CSI
   ESP_LOGI(TAG, "Step 2.5: Configuring CSI controller");
