@@ -26,19 +26,19 @@ Tab5Camera::~Tab5Camera() {
 this->deinit_camera_();
 }
 
-// Fonction helper pour écrire dans un registre I2C
 bool Tab5Camera::write_sensor_register_(uint16_t reg, uint8_t value) {
   uint8_t data[3];
-  data[0] = static_cast<uint8_t>(reg >> 8);   // MSB du registre
-  data[1] = static_cast<uint8_t>(reg & 0xFF); // LSB du registre
-  data[2] = value;                            // Valeur à écrire
+  data[0] = (reg >> 8) & 0xFF;  // MSB
+  data[1] = reg & 0xFF;         // LSB
+  data[2] = value;
 
-  if (!this->write(data, sizeof(data))) {
+  if (!this->write(data, 3)) {
     ESP_LOGE(TAG, "Failed to write register 0x%04X = 0x%02X", reg, value);
     return false;
   }
   return true;
 }
+
 
 
 // Fonction pour forcer le mode RAW8 du capteur
