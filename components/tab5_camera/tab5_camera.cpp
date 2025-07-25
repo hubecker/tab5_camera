@@ -3,7 +3,7 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/hal.h"
 #include "esp_timer.h"
-#include "M5Unified.h"
+
 
 #ifdef USE_ESP32
 #ifdef HAS_ESP32_P4_CAMERA
