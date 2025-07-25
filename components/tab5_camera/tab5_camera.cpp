@@ -3,6 +3,7 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/hal.h"
 #include "esp_timer.h"
+#include "M5Unified.h"
 
 #ifdef USE_ESP32
 #ifdef HAS_ESP32_P4_CAMERA
@@ -24,6 +25,17 @@ Tab5Camera::~Tab5Camera() {
 this->deinit_camera_();
 }
 
+void setup() {
+  M5.begin();
+  M5.Camera.begin(); // Initialisation caméra (vérifiée par les logs)
+}
+
+void loop() {
+  if (M5.Camera.capture()) { // Capture une frame
+    M5.Display.drawImage(M5.Camera.getfb(), 0, 0, M5.Camera.width(), M5.Camera.height()); // Affiche sur l'écran
+  }
+  delay(10);
+}
 void Tab5Camera::setup() {
 ESP_LOGCONFIG(TAG, "Setting up Tab5 Camera with ESP32-P4 MIPI-CSI...");
 
