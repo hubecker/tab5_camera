@@ -54,12 +54,12 @@ CONFIG_SCHEMA = cv.All(
             cv.GenerateID(): cv.declare_id(Tab5Camera),
             cv.Optional(CONF_NAME, default="Tab5 Camera"): cv.string,
             cv.Optional(CONF_EXTERNAL_CLOCK_PIN, default=0): cv.int_range(min=0, max=255),
-            cv.Optional(CONF_FREQUENCY, default=20000000): cv.positive_int,
+            cv.Optional(CONF_FREQUENCY, default=24000000): cv.positive_int,
             cv.Optional(CONF_RESET_PIN): pins.gpio_output_pin_schema,
-            cv.Optional(CONF_SENSOR_ADDRESS, default=0x24): cv.i2c_address,
+            cv.Optional(CONF_SENSOR_ADDRESS, default=0x30): cv.i2c_address,
             # Nouveaux paramètres
             cv.Optional(CONF_RESOLUTION, default="VGA"): validate_resolution,
-            cv.Optional(CONF_PIXEL_FORMAT, default="JPEG"): cv.one_of(*PIXEL_FORMATS.keys(), upper=True),
+            cv.Optional(CONF_PIXEL_FORMAT, default="RBB565"): cv.one_of(*PIXEL_FORMATS.keys(), upper=True),
             cv.Optional(CONF_JPEG_QUALITY, default=10): cv.int_range(min=1, max=63),
             cv.Optional(CONF_FRAMERATE, default=15): cv.int_range(min=1, max=60),
         }
