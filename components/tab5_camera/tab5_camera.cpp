@@ -249,8 +249,8 @@ bool Tab5Camera::init_camera_controller() {
     .input_data_color_type = CAM_CTLR_COLOR_RAW8,
     .output_data_color_type = CAM_CTLR_COLOR_RGB565,
     .byte_swap_en = false,
-    .queue_items = 1  // <-- pas de virgule ici si c’est le dernier champ
-  }; // <-- FIN correcte avec point-virgule
+    .queue_items = 1  
+  }; 
 
   esp_err_t ret = esp_cam_new_csi_ctlr(&csi_config, &this->cam_handle_);
   if (ret != ESP_OK) {
