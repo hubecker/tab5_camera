@@ -14,7 +14,7 @@ static const char *const TAG = "tab5_camera";
 #define TAB5_MIPI_CSI_LANE_BITRATE_MBPS 400
 #define TAB5_ISP_CLOCK_HZ 80000000  // 80MHz
 #define TAB5_STREAMING_STACK_SIZE 8192
-#define TAB5_FRAME_QUEUE_LENGTH 8
+#define TAB5_FRAME_QUEUE_LENGTH 16
 
 namespace esphome {
 namespace tab5_camera {
