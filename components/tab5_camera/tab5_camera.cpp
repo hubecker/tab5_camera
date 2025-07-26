@@ -250,7 +250,7 @@ bool Tab5Camera::init_camera_controller() {
     .output_data_color_type = CAM_CTLR_COLOR_RGB565,
     .byte_swap_en = false,
     .queue_items = 1  
-  }; 
+
 
   esp_err_t ret = esp_cam_new_csi_ctlr(&csi_config, &this->cam_handle_);
   if (ret != ESP_OK) {
