@@ -241,7 +241,10 @@ bool Tab5Camera::init_camera_() {
   csi_config.output_data_color_type = CAM_CTLR_COLOR_RGB565;
   csi_config.data_lane_num = 2;
   csi_config.byte_swap_en = false;
-  csi_config.queue_items = 16;
+  csi_config.queue_items = 64;
+
+  ESP_LOGI(TAG, "🔧 CSI config: queue_items=%d, h_res=%d, v_res=%d", 
+         csi_config.queue_items, csi_config.h_res, csi_config.v_res);
   
   esp_err_t ret = esp_cam_new_csi_ctlr(&csi_config, &this->cam_handle_);
   if (ret != ESP_OK) {
