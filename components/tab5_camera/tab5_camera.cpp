@@ -519,17 +519,17 @@ void Tab5Camera::streaming_loop_() {
   esp_cam_frame_t *frame = nullptr;
 
   while (!this->streaming_should_stop_) {
-    // Attente d'une trame complète (driver gère le double buffering en interne)
+    // Attente d'une trame capturée
     esp_err_t ret = esp_cam_ctlr_csi_receive_frame(this->cam_handle_, &frame, 100 / portTICK_PERIOD_MS);
 
     if (ret == ESP_OK && frame != nullptr) {
-      // Synchronisation du cache (si PSRAM ou DMA)
+      // Synchronisation du cache (DMA/PSRAM)
       esp_cache_msync(frame->buffer, frame->size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
 
-      // Appel des callbacks avec les données brutes
-      this->on_frame_callbacks_.call(static_cast<uint8_t*>(frame->buffer), frame->size);
+      // Utilisation de la trame
+      this->on_frame_callbacks_.call(static_cast<uint8_t *>(frame->buffer), frame->size);
 
-      // 🔓 Libération du buffer CSI
+      // Libération obligatoire pour éviter que la file CSI se bloque
       esp_cam_ctlr_csi_release_frame(this->cam_handle_, frame);
 
     } else if (ret != ESP_ERR_TIMEOUT) {
@@ -537,7 +537,7 @@ void Tab5Camera::streaming_loop_() {
       vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 
-    // Petite pause pour ne pas saturer le CPU
+    // Petit délai pour ne pas surcharger le CPU
     vTaskDelay(1 / portTICK_PERIOD_MS);
   }
 
@@ -545,6 +545,7 @@ void Tab5Camera::streaming_loop_() {
   ESP_LOGD(TAG, "Streaming loop ended for camera '%s'", this->name_.c_str());
   vTaskDelete(nullptr);
 }
+
 
 #endif
 
