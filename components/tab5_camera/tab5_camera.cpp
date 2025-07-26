@@ -16,7 +16,8 @@ static const char *const TAG = "tab5_camera";
 #define TAB5_MIPI_CSI_LANE_BITRATE_MBPS 400
 #define TAB5_ISP_CLOCK_HZ 80000000  // 80MHz
 #define TAB5_STREAMING_STACK_SIZE 8192
-#define TAB5_FRAME_QUEUE_LENGTH 8
+#define TAB5_FRAME_QUEUE_LENGTH 2
+#define TAB5_CSI_QUEUE_ITEMS 2
 
 namespace esphome {
 namespace tab5_camera {
@@ -248,7 +249,8 @@ bool Tab5Camera::init_camera_() {
   csi_config.output_data_color_type = CAM_CTLR_COLOR_RGB565;
   csi_config.data_lane_num = 2;
   csi_config.byte_swap_en = false;
-  csi_config.queue_items = 8;
+  
+  csi_config.queue_items = TAB5_CSI_QUEUE_ITEMS;  // CRITIQUE: réduit à 2 !
   
   esp_err_t ret = esp_cam_new_csi_ctlr(&csi_config, &this->cam_handle_);
   if (ret != ESP_OK) {
@@ -517,24 +519,37 @@ void Tab5Camera::streaming_task(void *parameter) {
 void Tab5Camera::streaming_loop_() {
   ESP_LOGD(TAG, "Streaming loop started for camera '%s'", this->name_.c_str());
 
-  esp_cam_ctlr_trans_t trans = {
-    .buffer = this->frame_buffer_,
-    .buflen = this->frame_buffer_size_,
-  };
+  FrameData frame;
+  uint32_t consecutive_timeouts = 0;
+  const uint32_t MAX_CONSECUTIVE_TIMEOUTS = 10;
 
   while (!this->streaming_should_stop_) {
-    // Capture d'une nouvelle frame si le contrôleur est prêt
-    esp_err_t ret = esp_cam_ctlr_receive(this->cam_handle_, &trans, 100 / portTICK_PERIOD_MS);
-
-    if (ret == ESP_OK) {
-      esp_cache_msync(this->frame_buffer_, this->frame_buffer_size_, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
-      this->on_frame_callbacks_.call(static_cast<uint8_t *>(this->frame_buffer_), this->frame_buffer_size_);
-    } else if (ret != ESP_ERR_TIMEOUT) {
-      ESP_LOGW(TAG, "Frame capture failed: %s", esp_err_to_name(ret));
+    // OPTIMISATION: Attendre une frame via la queue au lieu de polling direct
+    if (xQueueReceive(this->frame_queue_, &frame, 100 / portTICK_PERIOD_MS) == pdTRUE) {
+      // Frame reçue avec succès
+      consecutive_timeouts = 0;
+      
+      // Synchronisation du cache
+      esp_cache_msync(frame.buffer, frame.size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+      
+      // Appel des callbacks
+      this->on_frame_callbacks_.call(static_cast<uint8_t*>(frame.buffer), frame.size);
+      
+      // OPTIMISATION: Pause très courte pour permettre autres tâches
+      vTaskDelay(1 / portTICK_PERIOD_MS);
+      
+    } else {
+      // Timeout - pas de nouvelle frame
+      consecutive_timeouts++;
+      
+      if (consecutive_timeouts >= MAX_CONSECUTIVE_TIMEOUTS) {
+        ESP_LOGW(TAG, "No frames received for %d consecutive attempts", MAX_CONSECUTIVE_TIMEOUTS);
+        consecutive_timeouts = 0;  // Reset pour éviter le spam de logs
+      }
+      
+      // Pause plus longue en cas de timeout
       vTaskDelay(10 / portTICK_PERIOD_MS);
     }
-
-    vTaskDelay(1 / portTICK_PERIOD_MS);
   }
 
   this->streaming_active_ = false;
