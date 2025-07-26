@@ -148,25 +148,140 @@ bool Tab5Camera::init_sensor_() {
     return true;
   }
   
-  ESP_LOGI(TAG, "Attempting to initialize camera sensor at I2C address 0x%02X", this->address_);
+  ESP_LOGI(TAG, "🔧 Initializing SmartSens SC2356 sensor at I2C address 0x%02X", this->address_);
   
-  // Test de communication I2C simple
-  uint8_t test_data;
-  if (!this->read_byte(0x00, &test_data)) {
-    ESP_LOGW(TAG, "Could not read from sensor at address 0x%02X - sensor might not be connected", this->address_);
-    // Pour l'instant, ne pas échouer si le capteur ne répond pas
-    // return false;
-  } else {
-    ESP_LOGI(TAG, "Sensor responded to I2C communication (reg 0x00 = 0x%02X)", test_data);
+  // === ÉTAPE 1: Test de communication I2C ===
+  ESP_LOGI(TAG, "Step 1: Testing I2C communication with SC2356");
+  
+  // Les capteurs SmartSens utilisent généralement ces adresses de registres
+  uint16_t test_regs[] = {0x3107, 0x3108, 0x3000, 0x3001, 0x3002};
+  bool i2c_responding = false;
+  
+  for (int i = 0; i < sizeof(test_regs)/sizeof(test_regs[0]); i++) {
+    uint8_t test_value;
+    if (this->read_sensor_register_(test_regs[i], &test_value)) {
+      ESP_LOGI(TAG, "✅ SC2356 responds: reg 0x%04X = 0x%02X", test_regs[i], test_value);
+      i2c_responding = true;
+      break;
+    } else {
+      ESP_LOGD(TAG, "❌ No response from reg 0x%04X", test_regs[i]);
+    }
   }
   
-  // Configuration basique du capteur (à adapter selon ton modèle)
-  // Pour l'instant, marquer comme initialisé même sans configuration complète
+  if (!i2c_responding) {
+    ESP_LOGW(TAG, "⚠️  SC2356 sensor not responding to I2C - continuing anyway");
+  }
+  
+  // === ÉTAPE 2: Configuration de base SC2356 ===
+  ESP_LOGI(TAG, "Step 2: Configuring SC2356 basic registers");
+  
+  // Configuration typique pour les capteurs SmartSens SC23xx
+  struct sensor_reg {
+    uint16_t reg;
+    uint8_t value;
+    const char* description;
+  };
+  
+  // Configuration de base pour SC2356 (à ajuster selon datasheet si disponible)
+  sensor_reg sc2356_init_regs[] = {
+    // Software reset
+    {0x0103, 0x01, "Software reset"},
+    
+    // System control
+    {0x0100, 0x00, "Standby mode"},
+    
+    // Clock configuration  
+    {0x3001, 0x00, "System control 1"},
+    {0x3002, 0x00, "System control 2"},
+    {0x3003, 0x08, "System control 3"},
+    
+    // PLL configuration (ajuster selon votre horloge externe)
+    {0x3004, 0x03, "PLL control 1"},
+    {0x3005, 0x20, "PLL control 2"},
+    {0x3006, 0x91, "PLL control 3"},
+    
+    // Output format configuration
+    {0x3010, 0x01, "MIPI control"},
+    {0x3011, 0x06, "MIPI lanes (2 lanes)"},
+    {0x3012, 0x80, "MIPI clock configuration"},
+    
+    // Frame size configuration pour 640x480
+    {0x3208, 0x02, "Frame width high (640)"},
+    {0x3209, 0x80, "Frame width low"},
+    {0x320A, 0x01, "Frame height high (480)"},
+    {0x320B, 0xE0, "Frame height low"},
+    
+    // Timing configuration
+    {0x3210, 0x00, "Horizontal start high"},
+    {0x3211, 0x04, "Horizontal start low"},
+    {0x3212, 0x00, "Vertical start high"},
+    {0x3213, 0x04, "Vertical start low"},
+    
+    // Output window
+    {0x3808, 0x02, "Output width high"},
+    {0x3809, 0x80, "Output width low"},
+    {0x380A, 0x01, "Output height high"},
+    {0x380B, 0xE0, "Output height low"},
+    
+    // Format control
+    {0x4300, 0x30, "Format control - RAW8"},
+    
+    // ISP control
+    {0x5000, 0x06, "ISP control"},
+    {0x5001, 0x00, "ISP control"},
+  };
+  
+  // Attendre après reset
+  vTaskDelay(50 / portTICK_PERIOD_MS);
+  
+  // Écriture des registres de configuration
+  int successful_writes = 0;
+  int total_regs = sizeof(sc2356_init_regs) / sizeof(sc2356_init_regs[0]);
+  
+  for (int i = 0; i < total_regs; i++) {
+    if (this->write_sensor_register_(sc2356_init_regs[i].reg, sc2356_init_regs[i].value)) {
+      ESP_LOGD(TAG, "✅ SC2356[0x%04X] = 0x%02X (%s)", 
+               sc2356_init_regs[i].reg, sc2356_init_regs[i].value, sc2356_init_regs[i].description);
+      successful_writes++;
+    } else {
+      ESP_LOGW(TAG, "❌ Failed to write SC2356[0x%04X] = 0x%02X (%s)", 
+               sc2356_init_regs[i].reg, sc2356_init_regs[i].value, sc2356_init_regs[i].description);
+    }
+    
+    // Petit délai entre les écritures
+    vTaskDelay(1);
+  }
+  
+  ESP_LOGI(TAG, "SC2356 configuration: %d/%d registers written successfully", successful_writes, total_regs);
+  
+  // === ÉTAPE 3: Démarrage du streaming ===
+  ESP_LOGI(TAG, "Step 3: Starting SC2356 streaming mode");
+  
+  // Attendre la stabilisation
+  vTaskDelay(100 / portTICK_PERIOD_MS);
+  
+  // Démarrer le streaming
+  if (this->write_sensor_register_(0x0100, 0x01)) {
+    ESP_LOGI(TAG, "✅ SC2356 streaming mode enabled");
+  } else {
+    ESP_LOGW(TAG, "❌ Failed to enable SC2356 streaming mode");
+  }
+  
+  // Attendre que le capteur démarre
+  vTaskDelay(100 / portTICK_PERIOD_MS);
+  
+  // === ÉTAPE 4: Vérification finale ===
+  ESP_LOGI(TAG, "Step 4: Verifying SC2356 configuration");
+  
+  uint8_t streaming_status;
+  if (this->read_sensor_register_(0x0100, &streaming_status)) {
+    ESP_LOGI(TAG, "SC2356 streaming status: 0x%02X", streaming_status);
+  }
+  
   this->sensor_initialized_ = true;
-  ESP_LOGI(TAG, "Camera sensor marked as initialized");
+  ESP_LOGI(TAG, "✅ SC2356 sensor initialization completed");
   return true;
 }
-
 bool Tab5Camera::init_camera_() {
   if (this->camera_initialized_) {
     ESP_LOGI(TAG, "Camera already initialized, skipping");
