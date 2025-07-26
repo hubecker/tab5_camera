@@ -147,6 +147,8 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   bool init_ldo_();
   void deinit_camera_();
 
+  bool setup_external_clock_();
+
   // Debug et diagnostic
   void debug_camera_status();
   
