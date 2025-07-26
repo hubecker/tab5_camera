@@ -3,6 +3,7 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/hal.h"
 #include "esp_timer.h"
+#include "esp_cam_ctlr_csi.h"
 
 #ifdef USE_ESP32
 
