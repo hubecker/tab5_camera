@@ -234,34 +234,101 @@ void Tab5Camera::deallocate_frame_buffers_() {
   this->current_frame_buffer_ = nullptr;
 }
 
-bool Tab5Camera::init_camera_controller() {
-  ESP_LOGI(TAG, "Initializing CSI camera controller");
-  
-  // Configuration CSI (ordre des champs corrigé)
-  
-  
-  esp_cam_ctlr_csi_config_t csi_config = {
-    .ctlr_id = 0,
-    .h_res = TAB5_CAMERA_H_RES,
-    .v_res = TAB5_CAMERA_V_RES,
-    .data_lane_num = this->mipi_data_lanes_,
-    .lane_bit_rate_mbps = TAB5_MIPI_CSI_LANE_BITRATE_MBPS,
-    .input_data_color_type = CAM_CTLR_COLOR_RAW8,
-    .output_data_color_type = CAM_CTLR_COLOR_RGB565,
-    .byte_swap_en = false,
-    .queue_items = 1  
+bool Tab5Camera::init_camera_() {
+  if (this->camera_initialized_) {
+    ESP_LOGI(TAG, "Camera already initialized, skipping");
+    return true;
+  }
 
+  ESP_LOGI(TAG, "Starting camera initialization for '%s'", this->name_.c_str());
 
-  esp_err_t ret = esp_cam_new_csi_ctlr(&csi_config, &this->cam_handle_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to create CSI controller: %s", esp_err_to_name(ret));
+  // Étape 1: Initialisation du LDO MIPI
+  ESP_LOGI(TAG, "Step 2.1: Initializing MIPI LDO");
+  if (!this->init_ldo_()) {
+    ESP_LOGE(TAG, "Failed to initialize MIPI LDO");
     return false;
   }
+  ESP_LOGI(TAG, "MIPI LDO initialized successfully");
+
+  // Étape 2: Reset de la caméra si pin disponible
+  if (this->reset_pin_) {
+    ESP_LOGI(TAG, "Step 2.2: Executing camera reset sequence");
+    this->reset_pin_->setup();
+    this->reset_pin_->digital_write(false);
+    delayMicroseconds(10000);  // 10ms
+    this->reset_pin_->digital_write(true);
+    delayMicroseconds(10000);  // 10ms
+    ESP_LOGI(TAG, "Camera reset completed");
+  } else {
+    ESP_LOGI(TAG, "Step 2.2: No reset pin configured, skipping reset");
+  }
+
+  // Étape 3: Initialisation du capteur I2C
+  ESP_LOGI(TAG, "Step 2.3: Initializing camera sensor");
+  if (!this->init_sensor_()) {
+    ESP_LOGE(TAG, "Failed to initialize camera sensor");
+    return false;
+  }
+  ESP_LOGI(TAG, "Camera sensor initialized successfully");
+
+  // Étape 4: Allocation du frame buffer
+  ESP_LOGI(TAG, "Step 2.4: Allocating frame buffer");
+
+  // Calcul de la taille réelle requise
+  this->frame_buffer_size_ = TAB5_CAMERA_H_RES * TAB5_CAMERA_V_RES * 2; // RGB565 = 2 bytes par pixel
+
+  // Arrondi sur un multiple de 64 (cache line size)
+  this->frame_buffer_size_ = (this->frame_buffer_size_ + 63) & ~63;
+
+  ESP_LOGI(TAG, "Aligned frame buffer size: %zu bytes", this->frame_buffer_size_);
+
+  // Allocation alignée en PSRAM
+  this->frame_buffer_ = heap_caps_aligned_alloc(64, this->frame_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!this->frame_buffer_) {
+    ESP_LOGE(TAG, "Failed to allocate aligned frame buffer in PSRAM (%zu bytes) - trying regular RAM", this->frame_buffer_size_);
+
+    // Essai avec RAM normale
+    this->frame_buffer_ = heap_caps_aligned_alloc(64, this->frame_buffer_size_, MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
+    if (!this->frame_buffer_) {
+      ESP_LOGE(TAG, "Failed to allocate aligned frame buffer in regular RAM also");
+      return false;
+    }
+  }
+
+  ESP_LOGI(TAG, "Frame buffer allocated successfully at %p", this->frame_buffer_);
+
+
+
   
-  // Configuration des callbacks (comme dans l'exemple IDF)
+  
+  
+  // Étape 5: Configuration du contrôleur CSI
+  ESP_LOGI(TAG, "Step 2.5: Configuring CSI controller");
+  esp_cam_ctlr_csi_config_t csi_config = {};
+  csi_config.ctlr_id = 0;
+  csi_config.h_res = TAB5_CAMERA_H_RES;
+  csi_config.v_res = TAB5_CAMERA_V_RES;
+  csi_config.lane_bit_rate_mbps = TAB5_MIPI_CSI_LANE_BITRATE_MBPS;
+  csi_config.input_data_color_type = CAM_CTLR_COLOR_RAW8;
+  csi_config.output_data_color_type = CAM_CTLR_COLOR_RGB565;
+  csi_config.data_lane_num = 2;
+  csi_config.byte_swap_en = false;
+  csi_config.queue_items = 1;
+
+
+  
+  esp_err_t ret = esp_cam_new_csi_ctlr(&csi_config, &this->cam_handle_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "CSI controller init failed: %s", esp_err_to_name(ret));
+    return false;
+  }
+  ESP_LOGI(TAG, "CSI controller created successfully");
+  
+  // Étape 6: Configuration des callbacks
+  ESP_LOGI(TAG, "Step 2.6: Registering camera callbacks");
   esp_cam_ctlr_evt_cbs_t cbs = {
-    .on_get_new_trans = Tab5Camera::on_trans_finished_callback_,
-    .on_trans_finished = Tab5Camera::on_trans_finished_callback_,
+    .on_get_new_trans = Tab5Camera::camera_get_new_vb_callback,
+    .on_trans_finished = Tab5Camera::camera_get_finished_trans_callback,
   };
   
   ret = esp_cam_ctlr_register_event_callbacks(this->cam_handle_, &cbs, this);
@@ -269,18 +336,61 @@ bool Tab5Camera::init_camera_controller() {
     ESP_LOGE(TAG, "Failed to register camera callbacks: %s", esp_err_to_name(ret));
     return false;
   }
+  ESP_LOGI(TAG, "Camera callbacks registered successfully");
   
-  // Activation du contrôleur
+  // Étape 7: Activation du contrôleur de caméra
+  ESP_LOGI(TAG, "Step 2.7: Enabling camera controller");
   ret = esp_cam_ctlr_enable(this->cam_handle_);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "Failed to enable camera controller: %s", esp_err_to_name(ret));
     return false;
   }
+  ESP_LOGI(TAG, "Camera controller enabled successfully");
   
-  ESP_LOGI(TAG, "CSI camera controller initialized successfully");
+  // Étape 8: Configuration de l'ISP
+  ESP_LOGI(TAG, "Step 2.8: Configuring ISP processor");
+  esp_isp_processor_cfg_t isp_config = {};
+  isp_config.clk_hz = TAB5_ISP_CLOCK_HZ;
+  isp_config.input_data_source = ISP_INPUT_DATA_SOURCE_CSI;
+  isp_config.input_data_color_type = ISP_COLOR_RAW8;
+  isp_config.output_data_color_type = ISP_COLOR_RGB565;
+  isp_config.has_line_start_packet = false;
+  isp_config.has_line_end_packet = false;
+  isp_config.h_res = TAB5_CAMERA_H_RES;
+  isp_config.v_res = TAB5_CAMERA_V_RES;
+  
+  ret = esp_isp_new_processor(&isp_config, &this->isp_proc_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "ISP processor init failed: %s", esp_err_to_name(ret));
+    return false;
+  }
+  ESP_LOGI(TAG, "ISP processor created successfully");
+  
+  ret = esp_isp_enable(this->isp_proc_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to enable ISP processor: %s", esp_err_to_name(ret));
+    return false;
+  }
+  ESP_LOGI(TAG, "ISP processor enabled successfully");
+  
+  // Étape 9: Initialisation du frame buffer
+  ESP_LOGI(TAG, "Step 2.9: Initializing frame buffer");
+  memset(this->frame_buffer_, 0xFF, this->frame_buffer_size_);
+  esp_cache_msync(this->frame_buffer_, this->frame_buffer_size_, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+  ESP_LOGI(TAG, "Frame buffer initialized");
+  
+  // Étape 10: Démarrage de la caméra
+  ESP_LOGI(TAG, "Step 2.10: Starting camera controller");
+  ret = esp_cam_ctlr_start(this->cam_handle_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to start camera controller: %s", esp_err_to_name(ret));
+    return false;
+  }
+  
+  this->camera_initialized_ = true;
+  ESP_LOGI(TAG, "Camera '%s' initialized successfully - all steps completed", this->name_.c_str());
   return true;
 }
-
 bool Tab5Camera::init_isp_processor() {
   ESP_LOGI(TAG, "Initializing ISP processor");
   
