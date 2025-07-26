@@ -428,7 +428,6 @@ bool Tab5Camera::init_camera_() {
   ESP_LOGI(TAG, "Step 2.10: Starting camera controller");
   ret = esp_cam_ctlr_start(this->cam_handle_);
   if (ret != ESP_OK) {
-    ESPN_LOGE(TAG, "Failed to start camera controller: %s", esp_err_to_name(ret));
     return false;
   }
   
@@ -709,9 +708,6 @@ void Tab5Camera::streaming_loop_() {
   ESP_LOGI(TAG, "Streaming ended - %lu frames total", frame_count);
   vTaskDelete(nullptr);
 }
-
-
-
 
 #endif
 
