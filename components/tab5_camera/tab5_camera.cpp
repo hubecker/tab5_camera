@@ -238,6 +238,7 @@ bool Tab5Camera::init_camera_controller() {
   ESP_LOGI(TAG, "Initializing CSI camera controller");
   
   // Configuration CSI (ordre des champs corrigé)
+  
   esp_cam_ctlr_csi_config_t csi_config = {
     .ctlr_id = 0,
     .h_res = TAB5_CAMERA_H_RES,
@@ -248,7 +249,7 @@ bool Tab5Camera::init_camera_controller() {
     .output_data_color_type = CAM_CTLR_COLOR_RGB565,
     .byte_swap_en = false,
     .queue_items = 1,
-  };
+  }
   
   esp_err_t ret = esp_cam_new_csi_ctlr(&csi_config, &this->cam_handle_);
   if (ret != ESP_OK) {
