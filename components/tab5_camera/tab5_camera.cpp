@@ -237,15 +237,15 @@ void Tab5Camera::deallocate_frame_buffers_() {
 bool Tab5Camera::init_camera_controller() {
   ESP_LOGI(TAG, "Initializing CSI camera controller");
   
-  // Configuration CSI (basée sur l'exemple IDF)
+  // Configuration CSI (ordre des champs corrigé)
   esp_cam_ctlr_csi_config_t csi_config = {
     .ctlr_id = 0,
     .h_res = TAB5_CAMERA_H_RES,
     .v_res = TAB5_CAMERA_V_RES,
+    .data_lane_num = this->mipi_data_lanes_,
     .lane_bit_rate_mbps = TAB5_MIPI_CSI_LANE_BITRATE_MBPS,
     .input_data_color_type = CAM_CTLR_COLOR_RAW8,
     .output_data_color_type = CAM_CTLR_COLOR_RGB565,
-    .data_lane_num = this->mipi_data_lanes_,
     .byte_swap_en = false,
     .queue_items = 1,
   };
@@ -373,7 +373,7 @@ void Tab5Camera::cleanup_resources() {
     if (this->cam_handle_) {
       esp_cam_ctlr_stop(this->cam_handle_);
       esp_cam_ctlr_disable(this->cam_handle_);
-      esp_cam_del_ctlr(this->cam_handle_);
+      esp_cam_ctlr_del(this->cam_handle_);
       this->cam_handle_ = nullptr;
     }
     
@@ -586,7 +586,6 @@ uint16_t Tab5Camera::get_frame_height() const {
 }  // namespace esphome
 
 #endif  // USE_ESP32
-
 
 
 
