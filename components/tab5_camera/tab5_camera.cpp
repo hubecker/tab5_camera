@@ -714,7 +714,6 @@ void Tab5Camera::streaming_loop_() {
 }  // namespace tab5_camera
 }  // namespace esphome
 
-#endif  // USE_ESP32
 
 
 
