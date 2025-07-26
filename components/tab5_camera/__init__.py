@@ -56,7 +56,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_EXTERNAL_CLOCK_PIN, default=0): cv.int_range(min=0, max=255),
             cv.Optional(CONF_FREQUENCY, default=24000000): cv.positive_int,
             cv.Optional(CONF_RESET_PIN): pins.gpio_output_pin_schema,
-            cv.Optional(CONF_SENSOR_ADDRESS, default=0x60): cv.i2c_address,
+            cv.Optional(CONF_SENSOR_ADDRESS, default=0x43): cv.i2c_address,
             # Nouveaux paramètres
             cv.Optional(CONF_RESOLUTION, default="VGA"): validate_resolution,
             cv.Optional(CONF_PIXEL_FORMAT, default="RBB565"): cv.one_of(*PIXEL_FORMATS.keys(), upper=True),
