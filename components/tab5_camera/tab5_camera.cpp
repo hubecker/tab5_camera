@@ -13,8 +13,8 @@ static const char *const TAG = "tab5_camera";
 // Constantes de configuration pour Tab5
 #define TAB5_CAMERA_H_RES 640
 #define TAB5_CAMERA_V_RES 480
-#define TAB5_MIPI_CSI_LANE_BITRATE_MBPS 400
-#define TAB5_ISP_CLOCK_HZ 80000000  // 80MHz
+#define TAB5_MIPI_CSI_LANE_BITRATE_MBPS 200
+#define TAB5_ISP_CLOCK_HZ 50000000  
 #define TAB5_STREAMING_STACK_SIZE 8192
 #define TAB5_FRAME_QUEUE_LENGTH 8
 
