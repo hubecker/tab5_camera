@@ -5,7 +5,6 @@
 #include "esp_timer.h"
 
 #ifdef USE_ESP32
-#ifdef HAS_ESP32_P4_CAMERA
 
 static const char *const TAG = "tab5_camera";
 
@@ -96,7 +95,7 @@ void Tab5Camera::dump_config() {
   }
   ESP_LOGCONFIG(TAG, "  Frame Buffer Size: %zu bytes", this->frame_buffer_size_);
   ESP_LOGCONFIG(TAG, "  Streaming Support: Available");
-  ESP_LOGCONFIG(TAG, "  I2C Address: 0x%02X", this->address_);
+  ESP_LOGCONFIG(TAG, "  I2C Address: 0x%02X", this->get_i2c_address());
   
   if (this->reset_pin_) {
     LOG_PIN("  Reset Pin: ", this->reset_pin_);
@@ -116,6 +115,45 @@ float Tab5Camera::get_setup_priority() const {
 }
 
 #ifdef HAS_ESP32_P4_CAMERA
+
+// ===== MÉTHODES I2C CORRIGÉES =====
+bool Tab5Camera::read_sensor_register_(uint16_t reg, uint8_t *value) {
+  // SC2356 uses 16-bit register addresses
+  uint8_t reg_bytes[2] = {
+    static_cast<uint8_t>((reg >> 8) & 0xFF),  // High byte
+    static_cast<uint8_t>(reg & 0xFF)          // Low byte
+  };
+  
+  // Write register address then read value using ESPHome I2C API
+  if (!this->write_bytes_raw(reg_bytes, 2)) {
+    ESP_LOGV(TAG, "Failed to write register address 0x%04X", reg);
+    return false;
+  }
+  
+  if (!this->read_bytes_raw(value, 1)) {
+    ESP_LOGV(TAG, "Failed to read from register 0x%04X", reg);
+    return false;
+  }
+  
+  return true;
+}
+
+bool Tab5Camera::write_sensor_register_(uint16_t reg, uint8_t value) {
+  // SC2356 uses 16-bit register addresses
+  uint8_t data[3] = {
+    static_cast<uint8_t>((reg >> 8) & 0xFF),  // Register high byte
+    static_cast<uint8_t>(reg & 0xFF),         // Register low byte
+    value                                      // Value to write
+  };
+  
+  if (!this->write_bytes_raw(data, 3)) {
+    ESP_LOGV(TAG, "Failed to write 0x%02X to register 0x%04X", value, reg);
+    return false;
+  }
+  
+  return true;
+}
+
 bool Tab5Camera::init_ldo_() {
   if (this->ldo_initialized_) {
     ESP_LOGI(TAG, "LDO already initialized, skipping");
@@ -149,7 +187,7 @@ bool Tab5Camera::init_sensor_() {
     return true;
   }
   
-  ESP_LOGI(TAG, "🔧 Initializing SmartSens SC2356 sensor at I2C address 0x%02X", this->address_);
+  ESP_LOGI(TAG, "🔧 Initializing SmartSens SC2356 sensor at I2C address 0x%02X", this->get_i2c_address());
   
   // === ÉTAPE 1: Test de communication I2C ===
   ESP_LOGI(TAG, "Step 1: Testing I2C communication with SC2356");
@@ -280,9 +318,10 @@ void Tab5Camera::debug_camera_status() {
   ESP_LOGI(TAG, "ISP handle: %p", this->isp_proc_);
   ESP_LOGI(TAG, "Free heap: %lu bytes", esp_get_free_heap_size());
   ESP_LOGI(TAG, "Free PSRAM: %lu bytes", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-  ESP_LOGI(TAG, "I2C address: 0x%02X", this->address_);
+  ESP_LOGI(TAG, "I2C address: 0x%02X", this->get_i2c_address());
   ESP_LOGI(TAG, "===========================");
 }
+
 bool Tab5Camera::init_camera_() {
   if (this->camera_initialized_) {
     ESP_LOGI(TAG, "Camera already initialized, skipping");
@@ -428,7 +467,7 @@ bool Tab5Camera::init_camera_() {
   ESP_LOGI(TAG, "Step 2.10: Starting camera controller");
   ret = esp_cam_ctlr_start(this->cam_handle_);
   if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to start camera controller: %s", esp_err_to_name(ret));
+    ESPN_LOGE(TAG, "Failed to start camera controller: %s", esp_err_to_name(ret));
     return false;
   }
   
@@ -509,6 +548,7 @@ bool Tab5Camera::camera_get_finished_trans_callback(esp_cam_ctlr_handle_t handle
   frame.buffer = camera->frame_buffer_;
   frame.size = camera->frame_buffer_size_;
   frame.timestamp = esp_timer_get_time();  // Optionnel, timestamp en microsecondes
+  frame.valid = true;
   
   // On essaie de mettre la frame dans la queue (non bloquant)
   BaseType_t ret = xQueueSendFromISR(camera->frame_queue_, &frame, NULL);
@@ -523,7 +563,6 @@ bool Tab5Camera::camera_get_finished_trans_callback(esp_cam_ctlr_handle_t handle
   // Retourne false pour indiquer qu'on ne garde pas la possession exclusive de la buffer (selon doc IDF)
   return false;
 }
-
 
 bool Tab5Camera::take_snapshot() {
   if (!this->camera_initialized_) {
@@ -709,55 +748,10 @@ void Tab5Camera::streaming_loop_() {
   ESP_LOGI(TAG, "Streaming ended - %lu frames total", frame_count);
   vTaskDelete(nullptr);
 }
-bool Tab5Camera::read_sensor_register_(uint16_t reg, uint8_t *value) {
-  if (!this->parent_) {
-    ESP_LOGE(TAG, "I2C parent not configured");
-    return false;
-  }
-  
-  // SC2356 uses 16-bit register addresses
-  uint8_t reg_bytes[2] = {
-    static_cast<uint8_t>((reg >> 8) & 0xFF),  // High byte
-    static_cast<uint8_t>(reg & 0xFF)          // Low byte
-  };
-  
-  // Write register address then read value
-  esp_err_t err = this->parent_->write(this->address_, reg_bytes, 2, false);
-  if (err != ESP_OK) {
-    ESP_LOGV(TAG, "Failed to write register address 0x%04X: %s", reg, esp_err_to_name(err));
-    return false;
-  }
-  
-  err = this->parent_->read(this->address_, value, 1);
-  if (err != ESP_OK) {
-    ESP_LOGV(TAG, "Failed to read from register 0x%04X: %s", reg, esp_err_to_name(err));
-    return false;
-  }
-  
-  return true;
-}
 
-bool Tab5Camera::write_sensor_register_(uint16_t reg, uint8_t value) {
-  if (!this->parent_) {
-    ESP_LOGE(TAG, "I2C parent not configured");
-    return false;
-  }
-  
-  // SC2356 uses 16-bit register addresses
-  uint8_t data[3] = {
-    static_cast<uint8_t>((reg >> 8) & 0xFF),  // Register high byte
-    static_cast<uint8_t>(reg & 0xFF),         // Register low byte
-    value                                      // Value to write
-  };
-  
-  esp_err_t err = this->parent_->write(this->address_, data, 3);
-  if (err != ESP_OK) {
-    ESP_LOGV(TAG, "Failed to write 0x%02X to register 0x%04X: %s", value, reg, esp_err_to_name(err));
-    return false;
-  }
-  
-  return true;
-}
+
+
+
 #endif
 
 }  // namespace tab5_camera
