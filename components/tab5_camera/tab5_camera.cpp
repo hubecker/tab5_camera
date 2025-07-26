@@ -11,7 +11,7 @@ static const char *const TAG = "tab5_camera";
 // Constantes de configuration pour Tab5
 #define TAB5_CAMERA_H_RES 640
 #define TAB5_CAMERA_V_RES 480
-#define TAB5_MIPI_CSI_LANE_BITRATE_MBPS 400
+#define TAB5_MIPI_CSI_LANE_BITRATE_MBPS 200
 #define TAB5_ISP_CLOCK_HZ 80000000  // 80MHz
 #define TAB5_STREAMING_STACK_SIZE 8192
 #define TAB5_FRAME_QUEUE_LENGTH 16
@@ -153,7 +153,7 @@ bool Tab5Camera::init_sensor_() {
   // === ÉTAPE 1: Test de communication I2C ===
   ESP_LOGI(TAG, "Step 1: Testing I2C communication with SC2356");
   
-  // Les capteurs SmartSens utilisent généralement ces adresses de registres
+  // Test avec les registres typiques SC2356
   uint16_t test_regs[] = {0x3107, 0x3108, 0x3000, 0x3001, 0x3002};
   bool i2c_responding = false;
   
@@ -182,7 +182,7 @@ bool Tab5Camera::init_sensor_() {
     const char* description;
   };
   
-  // Configuration de base pour SC2356 (à ajuster selon datasheet si disponible)
+  // Configuration de base pour SC2356
   sensor_reg sc2356_init_regs[] = {
     // Software reset
     {0x0103, 0x01, "Software reset"},
@@ -195,7 +195,7 @@ bool Tab5Camera::init_sensor_() {
     {0x3002, 0x00, "System control 2"},
     {0x3003, 0x08, "System control 3"},
     
-    // PLL configuration (ajuster selon votre horloge externe)
+    // PLL configuration (ajuster selon horloge externe 24MHz)
     {0x3004, 0x03, "PLL control 1"},
     {0x3005, 0x20, "PLL control 2"},
     {0x3006, 0x91, "PLL control 3"},
@@ -210,12 +210,6 @@ bool Tab5Camera::init_sensor_() {
     {0x3209, 0x80, "Frame width low"},
     {0x320A, 0x01, "Frame height high (480)"},
     {0x320B, 0xE0, "Frame height low"},
-    
-    // Timing configuration
-    {0x3210, 0x00, "Horizontal start high"},
-    {0x3211, 0x04, "Horizontal start low"},
-    {0x3212, 0x00, "Vertical start high"},
-    {0x3213, 0x04, "Vertical start low"},
     
     // Output window
     {0x3808, 0x02, "Output width high"},
@@ -270,17 +264,23 @@ bool Tab5Camera::init_sensor_() {
   // Attendre que le capteur démarre
   vTaskDelay(100 / portTICK_PERIOD_MS);
   
-  // === ÉTAPE 4: Vérification finale ===
-  ESP_LOGI(TAG, "Step 4: Verifying SC2356 configuration");
-  
-  uint8_t streaming_status;
-  if (this->read_sensor_register_(0x0100, &streaming_status)) {
-    ESP_LOGI(TAG, "SC2356 streaming status: 0x%02X", streaming_status);
-  }
-  
   this->sensor_initialized_ = true;
   ESP_LOGI(TAG, "✅ SC2356 sensor initialization completed");
   return true;
+}
+
+void Tab5Camera::debug_camera_status() {
+  ESP_LOGI(TAG, "=== Camera Debug Status ===");
+  ESP_LOGI(TAG, "Camera initialized: %s", this->camera_initialized_ ? "YES" : "NO");
+  ESP_LOGI(TAG, "Streaming active: %s", this->streaming_active_ ? "YES" : "NO");
+  ESP_LOGI(TAG, "Frame buffer: %p", this->frame_buffer_);
+  ESP_LOGI(TAG, "Frame buffer size: %zu bytes", this->frame_buffer_size_);
+  ESP_LOGI(TAG, "Camera handle: %p", this->cam_handle_);
+  ESP_LOGI(TAG, "ISP handle: %p", this->isp_proc_);
+  ESP_LOGI(TAG, "Free heap: %lu bytes", esp_get_free_heap_size());
+  ESP_LOGI(TAG, "Free PSRAM: %lu bytes", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+  ESP_LOGI(TAG, "I2C address: 0x%02X", this->address_);
+  ESP_LOGI(TAG, "===========================");
 }
 bool Tab5Camera::init_camera_() {
   if (this->camera_initialized_) {
@@ -356,7 +356,7 @@ bool Tab5Camera::init_camera_() {
   csi_config.output_data_color_type = CAM_CTLR_COLOR_RGB565;
   csi_config.data_lane_num = 2;
   csi_config.byte_swap_en = false;
-  csi_config.queue_items = 64;
+  csi_config.queue_items = 32;
 
   ESP_LOGI(TAG, "🔧 CSI config: queue_items=%d, h_res=%d, v_res=%d", 
          csi_config.queue_items, csi_config.h_res, csi_config.v_res);
@@ -567,16 +567,40 @@ bool Tab5Camera::start_streaming() {
   
   ESP_LOGD(TAG, "Starting streaming for camera '%s'", this->name_.c_str());
   
+  // AJOUTER CE DEBUG :
+  this->debug_camera_status();
+  
+  // ===== TEST DE CAPTURE UNIQUE AVANT STREAMING =====
+  ESP_LOGW(TAG, "🧪 Testing single capture before streaming...");
+  
+  esp_cam_ctlr_trans_t test_trans = {
+    .buffer = this->frame_buffer_,
+    .buflen = this->frame_buffer_size_,
+  };
+  
+  esp_err_t test_ret = esp_cam_ctlr_receive(this->cam_handle_, &test_trans, 3000 / portTICK_PERIOD_MS);
+  
+  if (test_ret == ESP_OK) {
+    ESP_LOGI(TAG, "✅ SINGLE CAPTURE SUCCESS! Size: %zu bytes", test_trans.buflen);
+    
+    uint8_t* buf = static_cast<uint8_t*>(test_trans.buffer);
+    ESP_LOGW(TAG, "🔍 Sample data: %02x %02x %02x %02x", buf[0], buf[1], buf[2], buf[3]);
+    
+  } else {
+    ESP_LOGE(TAG, "❌ SINGLE CAPTURE FAILED: %s", esp_err_to_name(test_ret));
+    ESP_LOGE(TAG, "❌ This indicates camera/sensor is not working properly");
+  }
+  
   this->streaming_should_stop_ = false;
   this->streaming_active_ = true;
   
-  // Création de la tâche de streaming
+  // Création de la tâche de streaming avec priorité réduite
   BaseType_t result = xTaskCreate(
     Tab5Camera::streaming_task,
     "tab5_streaming",
     TAB5_STREAMING_STACK_SIZE,
     this,
-    3,  // Priorité élevée pour le streaming
+    3,  // PRIORITÉ RÉDUITE
     &this->streaming_task_handle_
   );
   
