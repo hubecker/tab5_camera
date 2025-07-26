@@ -514,36 +514,37 @@ void Tab5Camera::streaming_task(void *parameter) {
 
 void Tab5Camera::streaming_loop_() {
   ESP_LOGD(TAG, "Streaming loop started for camera '%s'", this->name_.c_str());
-  
-  esp_cam_ctlr_trans_t trans = {
-    .buffer = this->frame_buffer_,
-    .buflen = this->frame_buffer_size_,
-  };
-  
+
+  esp_cam_frame_t *frame = nullptr;
+
   while (!this->streaming_should_stop_) {
-    // Capture d'une nouvelle frame
-    esp_err_t ret = esp_cam_ctlr_receive(this->cam_handle_, &trans, 100 / portTICK_PERIOD_MS);
-    
-    if (ret == ESP_OK) {
-      // Synchronisation du cache
-      esp_cache_msync(this->frame_buffer_, this->frame_buffer_size_, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
-      
-      // Appel des callbacks
-      this->on_frame_callbacks_.call(static_cast<uint8_t*>(this->frame_buffer_), this->frame_buffer_size_);
-      
+    // Attente d'une trame complète (driver gère le double buffering en interne)
+    esp_err_t ret = esp_cam_ctlr_csi_receive_frame(this->cam_handle_, &frame, 100 / portTICK_PERIOD_MS);
+
+    if (ret == ESP_OK && frame != nullptr) {
+      // Synchronisation du cache (si PSRAM ou DMA)
+      esp_cache_msync(frame->buffer, frame->size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+
+      // Appel des callbacks avec les données brutes
+      this->on_frame_callbacks_.call(static_cast<uint8_t*>(frame->buffer), frame->size);
+
+      // 🔓 Libération du buffer CSI
+      esp_cam_ctlr_csi_release_frame(this->cam_handle_, frame);
+
     } else if (ret != ESP_ERR_TIMEOUT) {
-      ESP_LOGW(TAG, "Frame capture failed: %s", esp_err_to_name(ret));
-      vTaskDelay(10 / portTICK_PERIOD_MS);  // Pause courte en cas d'erreur
+      ESP_LOGW(TAG, "CSI frame receive failed: %s", esp_err_to_name(ret));
+      vTaskDelay(10 / portTICK_PERIOD_MS);
     }
-    
-    // Petite pause pour éviter de surcharger le CPU
+
+    // Petite pause pour ne pas saturer le CPU
     vTaskDelay(1 / portTICK_PERIOD_MS);
   }
-  
+
   this->streaming_active_ = false;
   ESP_LOGD(TAG, "Streaming loop ended for camera '%s'", this->name_.c_str());
-  vTaskDelete(nullptr);  // Supprime la tâche courante
+  vTaskDelete(nullptr);
 }
+
 #endif
 
 }  // namespace tab5_camera
