@@ -14,7 +14,7 @@ static const char *const TAG = "tab5_camera";
 #define TAB5_MIPI_CSI_LANE_BITRATE_MBPS 400
 #define TAB5_ISP_CLOCK_HZ 80000000  // 80MHz
 #define TAB5_STREAMING_STACK_SIZE 8192
-#define TAB5_FRAME_QUEUE_LENGTH 2
+#define TAB5_FRAME_QUEUE_LENGTH 8
 
 namespace esphome {
 namespace tab5_camera {
@@ -241,7 +241,7 @@ bool Tab5Camera::init_camera_() {
   csi_config.output_data_color_type = CAM_CTLR_COLOR_RGB565;
   csi_config.data_lane_num = 2;
   csi_config.byte_swap_en = false;
-  csi_config.queue_items = 3;
+  csi_config.queue_items = 8;
   
   esp_err_t ret = esp_cam_new_csi_ctlr(&csi_config, &this->cam_handle_);
   if (ret != ESP_OK) {
@@ -510,34 +510,34 @@ void Tab5Camera::streaming_task(void *parameter) {
 void Tab5Camera::streaming_loop_() {
   ESP_LOGD(TAG, "Streaming loop started for camera '%s'", this->name_.c_str());
   
-  esp_cam_ctlr_trans_t trans = {
-    .buffer = this->frame_buffer_,
-    .buflen = this->frame_buffer_size_,
-  };
+  FrameData frame_data;
   
   while (!this->streaming_should_stop_) {
-    // Capture d'une nouvelle frame
-    esp_err_t ret = esp_cam_ctlr_receive(this->cam_handle_, &trans, 100 / portTICK_PERIOD_MS);
-    
-    if (ret == ESP_OK) {
-      // Synchronisation du cache
-      esp_cache_msync(this->frame_buffer_, this->frame_buffer_size_, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+    // Attendre qu'une frame soit disponible via les callbacks
+    if (xSemaphoreTake(this->frame_ready_semaphore_, pdMS_TO_TICKS(200)) == pdTRUE) {
       
-      // Appel des callbacks
-      this->on_frame_callbacks_.call(static_cast<uint8_t*>(this->frame_buffer_), this->frame_buffer_size_);
-      
-    } else if (ret != ESP_ERR_TIMEOUT) {
-      ESP_LOGW(TAG, "Frame capture failed: %s", esp_err_to_name(ret));
-      vTaskDelay(10 / portTICK_PERIOD_MS);  // Pause courte en cas d'erreur
+      // Récupérer la frame depuis la queue
+      if (xQueueReceive(this->frame_queue_, &frame_data, 0) == pdTRUE) {
+        
+        // Synchronisation du cache
+        esp_cache_msync(frame_data.buffer, frame_data.size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+        
+        // Appel des callbacks avec la frame
+        this->on_frame_callbacks_.call(static_cast<uint8_t*>(frame_data.buffer), frame_data.size);
+        
+        ESP_LOGV(TAG, "Frame processed, size: %zu bytes", frame_data.size);
+      } else {
+        ESP_LOGW(TAG, "Frame semaphore signaled but queue empty");
+      }
     }
     
-    // Petite pause pour éviter de surcharger le CPU
-    vTaskDelay(1 / portTICK_PERIOD_MS);
+    // Pause très courte pour éviter la surcharge CPU
+    vTaskDelay(1);
   }
   
   this->streaming_active_ = false;
   ESP_LOGD(TAG, "Streaming loop ended for camera '%s'", this->name_.c_str());
-  vTaskDelete(nullptr);  // Supprime la tâche courante
+  vTaskDelete(nullptr);
 }
 #endif
 
