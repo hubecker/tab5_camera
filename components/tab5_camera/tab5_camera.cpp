@@ -114,77 +114,7 @@ float Tab5Camera::get_setup_priority() const {
   return setup_priority::HARDWARE - 1.0f;
 }
 
-#ifdef HAS_ESP32_P4_CAMERA
 
-// ===== MÉTHODES I2C CORRIGÉES =====
-bool Tab5Camera::read_sensor_register_(uint16_t reg, uint8_t *value) {
-  // Créer un buffer pour la transaction I2C complète
-  i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-  
-  // Start condition
-  i2c_master_start(cmd);
-  
-  // Write slave address with write bit
-  i2c_master_write_byte(cmd, (this->get_i2c_address() << 1) | I2C_MASTER_WRITE, true);
-  
-  // Write register address (16-bit)
-  i2c_master_write_byte(cmd, (reg >> 8) & 0xFF, true);  // High byte
-  i2c_master_write_byte(cmd, reg & 0xFF, true);         // Low byte
-  
-  // Repeated start for read
-  i2c_master_start(cmd);
-  
-  // Write slave address with read bit
-  i2c_master_write_byte(cmd, (this->get_i2c_address() << 1) | I2C_MASTER_READ, true);
-  
-  // Read data byte
-  i2c_master_read_byte(cmd, value, I2C_MASTER_NACK);
-  
-  // Stop condition
-  i2c_master_stop(cmd);
-  
-  // Execute transaction
-  esp_err_t ret = i2c_master_cmd_begin(this->get_i2c_port(), cmd, 1000 / portTICK_PERIOD_MS);
-  i2c_cmd_link_delete(cmd);
-  
-  return (ret == ESP_OK);
-}
-
-bool Tab5Camera::write_sensor_register_(uint16_t reg, uint8_t value) {
-  i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-  
-  // Start condition
-  i2c_master_start(cmd);
-  
-  // Write slave address with write bit
-  i2c_master_write_byte(cmd, (this->get_i2c_address() << 1) | I2C_MASTER_WRITE, true);
-  
-  // Write register address (16-bit)
-  i2c_master_write_byte(cmd, (reg >> 8) & 0xFF, true);  // High byte
-  i2c_master_write_byte(cmd, reg & 0xFF, true);         // Low byte
-  
-  // Write data value
-  i2c_master_write_byte(cmd, value, true);
-  
-  // Stop condition
-  i2c_master_stop(cmd);
-  
-  // Execute transaction
-  esp_err_t ret = i2c_master_cmd_begin(this->get_i2c_port(), cmd, 1000 / portTICK_PERIOD_MS);
-  i2c_cmd_link_delete(cmd);
-  
-  return (ret == ESP_OK);
-}
-
-bool Tab5Camera::write_sensor_register_safe_(uint16_t reg, uint8_t value) {
-  uint8_t data[3] = {
-    static_cast<uint8_t>((reg >> 8) & 0xFF),
-    static_cast<uint8_t>(reg & 0xFF),
-    value
-  };
-  
-  return this->write_bytes_raw(data, 3);
-}
 bool Tab5Camera::init_ldo_() {
   if (this->ldo_initialized_) {
     ESP_LOGI(TAG, "LDO already initialized, skipping");
