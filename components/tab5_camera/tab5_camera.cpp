@@ -119,18 +119,9 @@ float Tab5Camera::get_setup_priority() const {
 // ===== MÉTHODES I2C CORRIGÉES =====
 bool Tab5Camera::read_sensor_register_(uint16_t reg, uint8_t *value) {
   // SC2356 uses 16-bit register addresses
-  uint8_t reg_bytes[2] = {
-    static_cast<uint8_t>((reg >> 8) & 0xFF),  // High byte
-    static_cast<uint8_t>(reg & 0xFF)          // Low byte
-  };
-  
-  // Write register address then read value using ESPHome I2C API
-  if (!this->write_bytes(reg_bytes[0], &reg_bytes[1], 1)) {  // CORRECTION: write_bytes au lieu de write_bytes_raw
-    ESP_LOGV(TAG, "Failed to write register address 0x%04X", reg);
-    return false;
-  }
-  
-  if (!this->read_bytes(reg_bytes[0], value, 1)) {  // CORRECTION: read_bytes au lieu de read_bytes_raw
+  // CORRECTION: Utiliser l'API I2C ESPHome correcte
+  i2c::ErrorCode err = this->read_register16(reg, value, 1);
+  if (err != i2c::ERROR_OK) {
     ESP_LOGV(TAG, "Failed to read from register 0x%04X", reg);
     return false;
   }
@@ -140,12 +131,30 @@ bool Tab5Camera::read_sensor_register_(uint16_t reg, uint8_t *value) {
 
 bool Tab5Camera::write_sensor_register_(uint16_t reg, uint8_t value) {
   // SC2356 uses 16-bit register addresses
+  // CORRECTION: write_register16 attend un pointeur vers les données et une taille
+  i2c::ErrorCode err = this->write_register16(reg, &value, 1);
+  if (err != i2c::ERROR_OK) {
+    ESP_LOGV(TAG, "Failed to write 0x%02X to register 0x%04X", value, reg);
+    return false;
+  }
+  
+  return true;
+}
+
+// ===== CORRECTION 2: Alternative avec I2C direct si write_register16 n'existe pas =====
+bool Tab5Camera::write_sensor_register_alt_(uint16_t reg, uint8_t value) {
+  // Méthode alternative utilisant l'API I2C ESPHome standard
   uint8_t reg_high = static_cast<uint8_t>((reg >> 8) & 0xFF);
   uint8_t reg_low = static_cast<uint8_t>(reg & 0xFF);
   
-  // CORRECTION: Utiliser write_register16 pour les registres 16-bit
-  if (!this->write_register16(reg, value)) {
-    ESP_LOGV(TAG, "Failed to write 0x%02X to register 0x%04X", value, reg);
+  // Écrire l'adresse du registre puis la valeur
+  if (!this->write_bytes(reg_high, &reg_low, 1)) {
+    ESP_LOGV(TAG, "Failed to write register address 0x%04X", reg);
+    return false;
+  }
+  
+  if (!this->write_bytes(reg_high, &value, 1)) {
+    ESP_LOGV(TAG, "Failed to write value 0x%02X to register 0x%04X", value, reg);
     return false;
   }
   
