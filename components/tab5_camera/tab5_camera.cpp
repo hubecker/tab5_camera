@@ -369,9 +369,13 @@ void Tab5Camera::deinit_camera_() {
 
 bool Tab5Camera::camera_get_new_vb_callback(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data) {
   Tab5Camera *camera = static_cast<Tab5Camera*>(user_data);
+  if (!camera || !camera->streaming_active_) {
+    return false;  // Arrêter si pas de caméra ou streaming arrêté
+  }
+  
   trans->buffer = camera->frame_buffer_;
   trans->buflen = camera->frame_buffer_size_;
-  return false;
+  return true;  // Retourner true pour continuer
 }
 
 bool Tab5Camera::camera_get_finished_trans_callback(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data) {
@@ -454,7 +458,7 @@ bool Tab5Camera::start_streaming() {
     "tab5_streaming",
     TAB5_STREAMING_STACK_SIZE,
     this,
-    5,  // Priorité élevée pour le streaming
+    3,  // Priorité élevée pour le streaming
     &this->streaming_task_handle_
   );
   
