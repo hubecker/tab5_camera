@@ -517,7 +517,6 @@ void Tab5Camera::streaming_task(void *parameter) {
 void Tab5Camera::streaming_loop_() {
   ESP_LOGD(TAG, "Streaming loop started for camera '%s'", this->name_.c_str());
   
-  // Configuration de la transaction
   esp_cam_ctlr_trans_t trans = {
     .buffer = this->frame_buffer_,
     .buflen = this->frame_buffer_size_,
@@ -527,49 +526,47 @@ void Tab5Camera::streaming_loop_() {
   uint32_t error_count = 0;
   
   while (!this->streaming_should_stop_) {
-    // Déclencher une capture de frame
-    esp_err_t ret = esp_cam_ctlr_receive(this->cam_handle_, &trans, 200 / portTICK_PERIOD_MS);
+    // TIMEOUT RÉDUIT pour éviter l'accumulation
+    esp_err_t ret = esp_cam_ctlr_receive(this->cam_handle_, &trans, 50 / portTICK_PERIOD_MS);
     
     if (ret == ESP_OK) {
       frame_count++;
-      error_count = 0;  // Reset du compteur d'erreur
+      error_count = 0;
       
-      ESP_LOGV(TAG, "Frame %lu captured, size: %zu bytes", frame_count, trans.buflen);
+      ESP_LOGV(TAG, "📷 Frame %lu captured, size: %zu bytes", frame_count, trans.buflen);
       
       // Synchronisation du cache
       esp_cache_msync(this->frame_buffer_, this->frame_buffer_size_, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
       
-      // Appel des callbacks avec la frame
+      // Appel des callbacks
       this->on_frame_callbacks_.call(static_cast<uint8_t*>(this->frame_buffer_), trans.buflen);
       
-      // Log toutes les 30 frames pour suivre l'activité
-      if (frame_count % 30 == 0) {
-        ESP_LOGI(TAG, "Streaming active: %lu frames captured", frame_count);
+      // Log périodique
+      if (frame_count % 10 == 0) {  // Plus fréquent pour debug
+        ESP_LOGI(TAG, "✅ Streaming: %lu frames captured", frame_count);
       }
       
     } else if (ret == ESP_ERR_TIMEOUT) {
-      ESP_LOGV(TAG, "Frame capture timeout (normal)");
+      // Timeout normal, continuer
+      ESP_LOGV(TAG, "Frame timeout (normal)");
       
     } else {
       error_count++;
-      ESP_LOGW(TAG, "Frame capture error: %s (count: %lu)", esp_err_to_name(ret), error_count);
+      ESP_LOGW(TAG, "❌ Frame error: %s (count: %lu)", esp_err_to_name(ret), error_count);
       
-      // Si trop d'erreurs consécutives, pause plus longue
-      if (error_count > 10) {
-        ESP_LOGW(TAG, "Too many consecutive errors, pausing streaming...");
-        vTaskDelay(1000 / portTICK_PERIOD_MS);  // Pause 1 seconde
+      if (error_count > 5) {  // Réduit le seuil
+        ESP_LOGW(TAG, "Too many errors, pausing...");
+        vTaskDelay(500 / portTICK_PERIOD_MS);  // Pause plus courte
         error_count = 0;
-      } else {
-        vTaskDelay(50 / portTICK_PERIOD_MS);   // Pause courte
       }
     }
     
-    // Pause très courte entre les captures
-    vTaskDelay(1);
+    // Pause entre captures
+    vTaskDelay(10 / portTICK_PERIOD_MS);  // Pause plus longue (100ms)
   }
   
   this->streaming_active_ = false;
-  ESP_LOGI(TAG, "Streaming loop ended for camera '%s' - %lu frames captured total", this->name_.c_str(), frame_count);
+  ESP_LOGI(TAG, "Streaming ended - %lu frames total", frame_count);
   vTaskDelete(nullptr);
 }
 #endif
