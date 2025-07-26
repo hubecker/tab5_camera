@@ -580,6 +580,18 @@ uint16_t Tab5Camera::get_frame_height() const {
   return TAB5_CAMERA_V_RES;  // Pour l'instant, valeur fixe
 }
 
+// Fonction utilitaire pour parser le format de pixel depuis string
+PixelFormat Tab5Camera::parse_pixel_format_(const std::string &format) {
+  if (format == "RAW8") return PixelFormat::RAW8;
+  if (format == "RAW10") return PixelFormat::RAW10;
+  if (format == "YUV422") return PixelFormat::YUV422;
+  if (format == "RGB565") return PixelFormat::RGB565;
+  if (format == "JPEG") return PixelFormat::JPEG;
+  
+  ESP_LOGW(TAG, "Unknown pixel format '%s', defaulting to RAW8", format.c_str());
+  return PixelFormat::RAW8;
+}
+
 #endif // HAS_ESP32_P4_CAMERA
 
 }  // namespace tab5_camera
