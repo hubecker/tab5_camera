@@ -144,7 +144,137 @@ bool Tab5Camera::init_ldo_() {
   this->ldo_initialized_ = true;
   return true;  // Retourner true même si le LDO échoue
 }
+bool Tab5Camera::setup_external_clock_() {
+  if (this->external_clock_pin_ <= 0) {
+    ESP_LOGW(TAG, "No external clock pin configured");
+    return true; // Ce n'est pas forcément critique
+  }
+  
+  ESP_LOGI(TAG, "Configuring external clock on GPIO%u at %u Hz", 
+           this->external_clock_pin_, this->external_clock_frequency_);
+  
+  // Configuration du LEDC pour générer l'horloge
+  ledc_timer_config_t timer_conf = {};
+  timer_conf.speed_mode = LEDC_LOW_SPEED_MODE;
+  timer_conf.timer_num = LEDC_TIMER_0;
+  timer_conf.duty_resolution = LEDC_TIMER_1_BIT;
+  timer_conf.freq_hz = this->external_clock_frequency_;
+  timer_conf.clk_cfg = LEDC_AUTO_CLK;
+  
+  esp_err_t ret = ledc_timer_config(&timer_conf);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to configure LEDC timer: %s", esp_err_to_name(ret));
+    return false;
+  }
+  
+  ledc_channel_config_t channel_conf = {};
+  channel_conf.gpio_num = this->external_clock_pin_;
+  channel_conf.speed_mode = LEDC_LOW_SPEED_MODE;
+  channel_conf.channel = LEDC_CHANNEL_0;
+  channel_conf.timer_sel = LEDC_TIMER_0;
+  channel_conf.duty = 1; // 50% duty cycle
+  channel_conf.hpoint = 0;
+  
+  ret = ledc_channel_config(&channel_conf);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to configure LEDC channel: %s", esp_err_to_name(ret));
+    return false;
+  }
+  
+  ESP_LOGI(TAG, "External clock configured successfully");
+  return true;
+}
 
+// Configuration complète du capteur
+bool Tab5Camera::init_sensor_() {
+  if (this->sensor_initialized_) {
+    ESP_LOGI(TAG, "Sensor already initialized, skipping");
+    return true;
+  }
+  
+  ESP_LOGI(TAG, "Attempting to initialize camera sensor at I2C address 0x%02X", this->address_);
+  
+  // Attendre que le capteur soit prêt après reset/power-on
+  vTaskDelay(100 / portTICK_PERIOD_MS);
+  
+  // Test de communication I2C
+  uint8_t chip_id_high, chip_id_low;
+  if (!this->read_byte(0x0A, &chip_id_high) || !this->read_byte(0x0B, &chip_id_low)) {
+    ESP_LOGW(TAG, "Could not read chip ID from sensor at address 0x%02X", this->address_);
+    return false;
+  }
+  
+  uint16_t chip_id = (chip_id_high << 8) | chip_id_low;
+  ESP_LOGI(TAG, "Sensor chip ID: 0x%04X", chip_id);
+  
+  // Configuration basique du capteur (exemple pour capteur générique)
+  // IMPORTANT: Adaptez ces valeurs selon votre capteur spécifique !
+  
+  struct sensor_reg {
+    uint8_t reg;
+    uint8_t val;
+  };
+  
+  // Configuration de base (à adapter selon votre capteur)
+  const sensor_reg sensor_init_regs[] = {
+    // Reset software
+    {0x12, 0x80},  // Soft reset
+    
+    // Attendre le reset
+    {0xFF, 0x64},  // Délai 100ms (valeur spéciale)
+    
+    // Configuration de base
+    {0x12, 0x00},  // Normal mode
+    {0x11, 0x00},  // Clock prescaler
+    {0x0C, 0x00},  // Format de sortie
+    {0x3E, 0x00},  // Test pattern off
+    
+    // Configuration de taille d'image pour 640x480
+    {0x32, 0x80},  // HREF control
+    {0x17, 0x16},  // HSTART
+    {0x18, 0x04},  // HSTOP  
+    {0x19, 0x02},  // VSTART
+    {0x1A, 0x7A},  // VSTOP
+    {0x03, 0x0A},  // VREF
+    
+    // Configuration couleur et contrôle
+    {0x0E, 0x61},  // Output format
+    {0x0F, 0x4B},  // Output format
+    {0x16, 0x02},  // Color matrix
+    {0x1E, 0x07},  // Mirror and flip
+    {0x21, 0x02},  // Reserved
+    {0x22, 0x91},  // Reserved
+    {0x29, 0x07},  // Reserved
+    {0x33, 0x0B},  // Reserved
+    {0x35, 0x0B},  // Reserved
+    {0x37, 0x1D},  // Reserved
+    {0x38, 0x71},  // Reserved
+    {0x39, 0x2A},  // Reserved
+    
+    // Fin de la configuration
+    {0xFF, 0xFF}   // Marqueur de fin
+  };
+  
+  // Écriture des registres
+  for (int i = 0; sensor_init_regs[i].reg != 0xFF || sensor_init_regs[i].val != 0xFF; i++) {
+    if (sensor_init_regs[i].reg == 0xFF) {
+      // Délai spécial
+      vTaskDelay(sensor_init_regs[i].val / portTICK_PERIOD_MS);
+      continue;
+    }
+    
+    if (!this->write_byte(sensor_init_regs[i].reg, sensor_init_regs[i].val)) {
+      ESP_LOGW(TAG, "Failed to write register 0x%02X = 0x%02X", 
+               sensor_init_regs[i].reg, sensor_init_regs[i].val);
+      // Continuer malgré l'erreur pour voir si d'autres registres passent
+    } else {
+      ESP_LOGD(TAG, "Wrote register 0x%02X = 0x%02X", 
+               sensor_init_regs[i].reg, sensor_init_regs[i].val);
+    }
+    
+    // Petit délai entre les écritures
+    vTaskDelay(1 / portTICK_PERIOD_MS);
+  }
 bool Tab5Camera::init_sensor_() {
   if (this->sensor_initialized_) {
     ESP_LOGI(TAG, "Sensor already initialized, skipping");
