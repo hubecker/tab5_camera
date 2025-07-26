@@ -709,47 +709,6 @@ void Tab5Camera::streaming_loop_() {
   vTaskDelete(nullptr);
 }
 
-#ifdef HAS_ESP32_P4_CAMERA
-
-bool Tab5Camera::write_sensor_register_(uint16_t reg, uint8_t value) {
-  // Les capteurs SmartSens utilisent des adresses de registre 16-bit
-  uint8_t reg_high = (reg >> 8) & 0xFF;
-  uint8_t reg_low = reg & 0xFF;
-  
-  // Écriture: [reg_high] [reg_low] [value]
-  uint8_t data[3] = {reg_high, reg_low, value};
-  
-  esp_err_t err = this->write(data, 3);
-  if (err != ESP_OK) {
-    ESP_LOGV(TAG, "I2C write failed for reg 0x%04X: %s", reg, esp_err_to_name(err));
-    return false;
-  }
-  
-  return true;
-}
-
-bool Tab5Camera::read_sensor_register_(uint16_t reg, uint8_t *value) {
-  // Les capteurs SmartSens utilisent des adresses de registre 16-bit
-  uint8_t reg_high = (reg >> 8) & 0xFF;
-  uint8_t reg_low = reg & 0xFF;
-  
-  // Écriture de l'adresse du registre
-  uint8_t reg_addr[2] = {reg_high, reg_low};
-  esp_err_t err = this->write(reg_addr, 2, false); // false = pas de stop bit
-  if (err != ESP_OK) {
-    ESP_LOGV(TAG, "I2C write address failed for reg 0x%04X: %s", reg, esp_err_to_name(err));
-    return false;
-  }
-  
-  // Lecture de la valeur
-  err = this->read(value, 1);
-  if (err != ESP_OK) {
-    ESP_LOGV(TAG, "I2C read failed for reg 0x%04X: %s", reg, esp_err_to_name(err));
-    return false;
-  }
-  
-  return true;
-}
 #endif
 
 }  // namespace tab5_camera
