@@ -98,14 +98,22 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   void set_mipi_lane_bitrate(uint32_t bitrate) { this->mipi_lane_bitrate_ = bitrate; }
   void set_mipi_idi_clock_rate(uint32_t rate) { this->mipi_idi_clock_rate_ = rate; }
 
-  // Paramètres de caméra
+  // Paramètres de caméra (compatibilité avec l'ancienne API)
   void set_resolution(CameraResolution res) { this->resolution_ = res; }
+  void set_resolution(uint16_t width, uint16_t height) { 
+    this->custom_width_ = width; 
+    this->custom_height_ = height;
+    this->resolution_ = CameraResolution::CUSTOM;
+  }
   void set_custom_resolution(uint16_t width, uint16_t height) { 
     this->custom_width_ = width; 
     this->custom_height_ = height;
     this->resolution_ = CameraResolution::CUSTOM;
   }
   void set_pixel_format(PixelFormat format) { this->pixel_format_ = format; }
+  void set_pixel_format(const std::string &format) { 
+    this->pixel_format_ = parse_pixel_format_(format); 
+  }
   void set_jpeg_quality(uint8_t quality) { 
     this->jpeg_quality_ = std::max(static_cast<uint8_t>(1), std::min(quality, static_cast<uint8_t>(63))); 
   }
@@ -210,7 +218,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   // Utilitaires
   ResolutionConfig get_resolution_config_() const;
   size_t calculate_frame_size_() const;
-  esp_cam_ctlr_color_t get_esp_color_format_() const;
+  cam_ctlr_color_t get_esp_color_format_() const;
   
   // Debug et diagnostic
   void debug_camera_status_();
@@ -286,6 +294,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   // Méthodes utilitaires privées
   void set_error_(const std::string &error);
   void clear_error_();
+  PixelFormat parse_pixel_format_(const std::string &format);
   
   // Table de configuration des résolutions
   static const ResolutionConfig resolution_configs_[];
