@@ -4,7 +4,7 @@
 #include "esphome/core/hal.h"
 #include "esp_timer.h"
 #include "esp_cam_ctlr_csi.h"
-#include "esp_cam_frame.h"
+
 
 #ifdef USE_ESP32
 
@@ -517,28 +517,23 @@ void Tab5Camera::streaming_task(void *parameter) {
 void Tab5Camera::streaming_loop_() {
   ESP_LOGD(TAG, "Streaming loop started for camera '%s'", this->name_.c_str());
 
-  esp_cam_frame_t *frame = nullptr;
+  esp_cam_ctlr_trans_t trans = {
+    .buffer = this->frame_buffer_,
+    .buflen = this->frame_buffer_size_,
+  };
 
   while (!this->streaming_should_stop_) {
-    // Attente d'une trame capturée
-    esp_err_t ret = esp_cam_ctlr_csi_receive_frame(this->cam_handle_, &frame, 100 / portTICK_PERIOD_MS);
+    // Capture d'une nouvelle frame si le contrôleur est prêt
+    esp_err_t ret = esp_cam_ctlr_receive(this->cam_handle_, &trans, 100 / portTICK_PERIOD_MS);
 
-    if (ret == ESP_OK && frame != nullptr) {
-      // Synchronisation du cache (DMA/PSRAM)
-      esp_cache_msync(frame->buffer, frame->size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
-
-      // Utilisation de la trame
-      this->on_frame_callbacks_.call(static_cast<uint8_t *>(frame->buffer), frame->size);
-
-      // Libération obligatoire pour éviter que la file CSI se bloque
-      esp_cam_ctlr_csi_release_frame(this->cam_handle_, frame);
-
+    if (ret == ESP_OK) {
+      esp_cache_msync(this->frame_buffer_, this->frame_buffer_size_, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+      this->on_frame_callbacks_.call(static_cast<uint8_t *>(this->frame_buffer_), this->frame_buffer_size_);
     } else if (ret != ESP_ERR_TIMEOUT) {
-      ESP_LOGW(TAG, "CSI frame receive failed: %s", esp_err_to_name(ret));
+      ESP_LOGW(TAG, "Frame capture failed: %s", esp_err_to_name(ret));
       vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 
-    // Petit délai pour ne pas surcharger le CPU
     vTaskDelay(1 / portTICK_PERIOD_MS);
   }
 
@@ -546,6 +541,7 @@ void Tab5Camera::streaming_loop_() {
   ESP_LOGD(TAG, "Streaming loop ended for camera '%s'", this->name_.c_str());
   vTaskDelete(nullptr);
 }
+
 
 
 #endif
