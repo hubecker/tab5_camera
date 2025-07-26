@@ -514,33 +514,59 @@ void Tab5Camera::streaming_task(void *parameter) {
 void Tab5Camera::streaming_loop_() {
   ESP_LOGD(TAG, "Streaming loop started for camera '%s'", this->name_.c_str());
   
-  FrameData frame_data;
+  // Configuration de la transaction
+  esp_cam_ctlr_trans_t trans = {
+    .buffer = this->frame_buffer_,
+    .buflen = this->frame_buffer_size_,
+  };
+  
+  uint32_t frame_count = 0;
+  uint32_t error_count = 0;
   
   while (!this->streaming_should_stop_) {
-    // Attendre qu'une frame soit disponible via les callbacks
-    if (xSemaphoreTake(this->frame_ready_semaphore_, pdMS_TO_TICKS(200)) == pdTRUE) {
+    // Déclencher une capture de frame
+    esp_err_t ret = esp_cam_ctlr_receive(this->cam_handle_, &trans, 200 / portTICK_PERIOD_MS);
+    
+    if (ret == ESP_OK) {
+      frame_count++;
+      error_count = 0;  // Reset du compteur d'erreur
       
-      // Récupérer la frame depuis la queue
-      if (xQueueReceive(this->frame_queue_, &frame_data, 0) == pdTRUE) {
-        
-        // Synchronisation du cache
-        esp_cache_msync(frame_data.buffer, frame_data.size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
-        
-        // Appel des callbacks avec la frame
-        this->on_frame_callbacks_.call(static_cast<uint8_t*>(frame_data.buffer), frame_data.size);
-        
-        ESP_LOGV(TAG, "Frame processed, size: %zu bytes", frame_data.size);
+      ESP_LOGV(TAG, "Frame %lu captured, size: %zu bytes", frame_count, trans.buflen);
+      
+      // Synchronisation du cache
+      esp_cache_msync(this->frame_buffer_, this->frame_buffer_size_, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+      
+      // Appel des callbacks avec la frame
+      this->on_frame_callbacks_.call(static_cast<uint8_t*>(this->frame_buffer_), trans.buflen);
+      
+      // Log toutes les 30 frames pour suivre l'activité
+      if (frame_count % 30 == 0) {
+        ESP_LOGI(TAG, "Streaming active: %lu frames captured", frame_count);
+      }
+      
+    } else if (ret == ESP_ERR_TIMEOUT) {
+      ESP_LOGV(TAG, "Frame capture timeout (normal)");
+      
+    } else {
+      error_count++;
+      ESP_LOGW(TAG, "Frame capture error: %s (count: %lu)", esp_err_to_name(ret), error_count);
+      
+      // Si trop d'erreurs consécutives, pause plus longue
+      if (error_count > 10) {
+        ESP_LOGW(TAG, "Too many consecutive errors, pausing streaming...");
+        vTaskDelay(1000 / portTICK_PERIOD_MS);  // Pause 1 seconde
+        error_count = 0;
       } else {
-        ESP_LOGW(TAG, "Frame semaphore signaled but queue empty");
+        vTaskDelay(50 / portTICK_PERIOD_MS);   // Pause courte
       }
     }
     
-    // Pause très courte pour éviter la surcharge CPU
+    // Pause très courte entre les captures
     vTaskDelay(1);
   }
   
   this->streaming_active_ = false;
-  ESP_LOGD(TAG, "Streaming loop ended for camera '%s'", this->name_.c_str());
+  ESP_LOGI(TAG, "Streaming loop ended for camera '%s' - %lu frames captured total", this->name_.c_str(), frame_count);
   vTaskDelete(nullptr);
 }
 #endif
