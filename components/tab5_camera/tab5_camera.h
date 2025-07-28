@@ -7,6 +7,16 @@
 
 #ifdef USE_ESP32
 
+// Constantes des capteurs Tab5
+#define OV5645_CHIP_ID    0x5645
+#define SC2336_CHIP_ID    0x2336
+#define SC2356_CHIP_ID    0x2356
+
+// Adresses I2C des capteurs
+#define OV5645_SCCB_ADDR  0x3C
+#define SC2336_SCCB_ADDR  0x30  
+#define SC2356_SCCB_ADDR  0x30
+
 // Vérification spécifique pour ESP32-P4
 #if defined(CONFIG_IDF_TARGET_ESP32P4) || (defined(CONFIG_IDF_TARGET) && defined(CONFIG_IDF_TARGET_ESP32P4))
 #define HAS_ESP32_P4_CAMERA 1
@@ -216,17 +226,31 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   // Callbacks
   CallbackManager<void(uint8_t*, size_t)> on_frame_callbacks_;
   
+  // NOUVEAUX MEMBRES pour corriger les erreurs
+  uint16_t detected_sensor_id_{0};
+  uint8_t detected_sensor_address_{0};
+  
   // Méthodes utilitaires privées
   void set_error_(const std::string &error);
   void clear_error_();
   PixelFormat parse_pixel_format_(const std::string &format);
   size_t calculate_frame_size_() const;
+  
+  // NOUVELLES MÉTHODES pour corriger les erreurs de lien
+  uint16_t detect_sensor_id_();
+  bool test_sensor_communication_(uint8_t address);
+  bool configure_ov5645_();
+  bool configure_sc2336_();
+  bool configure_sc2356_();  
+  bool read_byte_16(uint16_t reg, uint8_t *data);
+  bool write_byte_16(uint16_t reg, uint8_t data);
 };
 
 }  // namespace tab5_camera
 }  // namespace esphome
 
 #endif  // USE_ESP32
+
 
 
 
