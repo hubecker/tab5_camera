@@ -221,6 +221,10 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   void deinit_camera_();
   bool setup_external_clock_();
 
+  bool write_bytes_raw_(const uint8_t *data, size_t len);
+  bool read_bytes_raw_(uint8_t *data, size_t len);
+
+
   // Configuration SC2356
   bool configure_sc2356_();
   bool reset_sc2356_();
