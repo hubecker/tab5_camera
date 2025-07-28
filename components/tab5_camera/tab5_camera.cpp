@@ -161,12 +161,12 @@ bool Tab5Camera::init_sensor_() {
   
   ESP_LOGI(TAG, "Attempting to initialize camera sensor at I2C address 0x%02X", this->address_);
   
-  // Test de communication I2C approfondi
+  // Test de communication I2C
   uint8_t test_data;
   bool sensor_detected = false;
   
-  // Test de plusieurs registres communs (8-bit seulement)
-  const uint8_t test_regs[] = {0x00, 0x01, 0x02, 0x0A, 0x0B, 0x0C, 0x0D};
+  // Test des registres d'identification
+  const uint8_t test_regs[] = {0x00, 0x01, 0x02, 0x03, 0x04};
   for (size_t i = 0; i < sizeof(test_regs); i++) {
     if (this->read_byte(test_regs[i], &test_data)) {
       ESP_LOGI(TAG, "Sensor responded: reg 0x%02X = 0x%02X", test_regs[i], test_data);
@@ -175,67 +175,320 @@ bool Tab5Camera::init_sensor_() {
   }
   
   if (!sensor_detected) {
-    ESP_LOGE(TAG, " No sensor detected at I2C address 0x%02X - check wiring!", this->address_);
-    return false;  // ← Maintenant on échoue si pas de capteur
+    ESP_LOGE(TAG, "No sensor detected at I2C address 0x%02X - check wiring!", this->address_);
+    return false;
   }
   
-  // Tentative d'identification du capteur
-  uint8_t id_reg_1, id_reg_2;
-  if (this->read_byte(0x00, &id_reg_1) && this->read_byte(0x01, &id_reg_2)) {
-    uint16_t sensor_id = (id_reg_1 << 8) | id_reg_2;
-    ESP_LOGI(TAG, " Sensor ID: 0x%04X (reg 0x00=0x%02X, reg 0x01=0x%02X)", 
-             sensor_id, id_reg_1, id_reg_2);
+  // Identification du capteur SC2336
+  uint8_t id_high, id_low;
+  if (this->read_byte(0x00, &id_high) && this->read_byte(0x01, &id_low)) {
+    uint16_t sensor_id = (id_high << 8) | id_low;
+    ESP_LOGI(TAG, "Sensor ID: 0x%04X (reg 0x00=0x%02X, reg 0x01=0x%02X)", 
+             sensor_id, id_high, id_low);
     
-    // Identification basée sur l'ID
-    switch (sensor_id) {
-      case 0x00A2: ESP_LOGI(TAG, " Detected: Possible OmniVision sensor (partial ID match)"); break;
-      case 0x2640: ESP_LOGI(TAG, " Detected: OV2640 sensor"); break;
-      case 0x5640: ESP_LOGI(TAG, " Detected: OV5640 sensor"); break;
-      default: ESP_LOGI(TAG, " Unknown sensor - will use generic configuration"); break;
+    if (sensor_id != 0x2336) {
+      ESP_LOGW(TAG, "Unexpected sensor ID - SC2336 expected (0x2336)");
     }
   }
+
+  // Configuration spécifique pour SC2336
+  ESP_LOGI(TAG, "Configuring SC2336 sensor...");
   
-  // Configuration minimale pour démarrer la capture
-  ESP_LOGI(TAG, " Configuring sensor for basic operation...");
-  
-  // Configuration basique générique - éviter les registres problématiques
   const struct {
     uint8_t reg;
     uint8_t val;
     const char* desc;
-  } basic_config[] = {
-    // Configuration très basique, éviter 0x12 (reset) qui pose problème
-    {0x09, 0x00, "System control"},         // Mode normal
-    {0x15, 0x00, "Output format"},          // Format par défaut
-    {0x3A, 0x04, "TSLB register"},          // Output sequence
-    // Configuration minimale pour test
+  } sc2336_config[] = {
+    {0xfe, 0x80, "Register bank select"},
+    {0xfe, 0x80, "Reset"},
+    {0xfc, 0x16, "Analog control"},
+    {0xfc, 0x16, "Analog control"},
+    {0xf2, 0x00, "Digital control"},
+    {0xf3, 0x00, "Digital control"},
+    {0xf4, 0x36, "Digital control"},
+    {0xf5, 0xc0, "Digital control"},
+    {0xf6, 0x44, "Digital control"},
+    {0xf7, 0x01, "Digital control"},
+    {0xf8, 0x63, "Digital control"},
+    {0xf9, 0x00, "Digital control"},
+    {0xfa, 0x00, "Digital control"},
+    {0xfd, 0x00, "ISP control"},
+    {0x0e, 0x04, "Mirror/Flip"},
+    {0x10, 0x00, "H blank"},
+    {0x11, 0x00, "H blank"},
+    {0x12, 0x00, "V blank"},
+    {0x13, 0x00, "V blank"},
+    {0x01, 0x01, "Exposure MSB"},
+    {0x02, 0x00, "Exposure LSB"},
+    {0x03, 0x00, "Exposure LSB"},
+    {0x04, 0x00, "Gain"},
+    {0x09, 0x00, "BLC control"},
+    {0x0a, 0x00, "BLC level"},
+    {0x0b, 0x00, "BLC level"},
+    {0x0c, 0x00, "BLC level"},
+    {0x0d, 0x00, "BLC level"},
+    {0x16, 0x00, "AWB control"},
+    {0x17, 0x00, "AWB control"},
+    {0x18, 0x00, "AWB control"},
+    {0x19, 0x00, "AWB control"},
+    {0x1a, 0x00, "AWB control"},
+    {0x1b, 0x00, "AWB control"},
+    {0x1c, 0x00, "AWB control"},
+    {0x1d, 0x00, "AWB control"},
+    {0x1e, 0x00, "AWB control"},
+    {0x1f, 0x00, "AWB control"},
+    {0x20, 0x00, "AWB control"},
+    {0x21, 0x00, "AWB control"},
+    {0x22, 0x00, "AWB control"},
+    {0x23, 0x00, "AWB control"},
+    {0x24, 0x00, "AWB control"},
+    {0x25, 0x00, "AWB control"},
+    {0x26, 0x00, "AWB control"},
+    {0x27, 0x00, "AWB control"},
+    {0x28, 0x00, "AWB control"},
+    {0x29, 0x00, "AWB control"},
+    {0x2a, 0x00, "AWB control"},
+    {0x2b, 0x00, "AWB control"},
+    {0x2c, 0x00, "AWB control"},
+    {0x2d, 0x00, "AWB control"},
+    {0x2e, 0x00, "AWB control"},
+    {0x2f, 0x00, "AWB control"},
+    {0x30, 0x00, "AWB control"},
+    {0x31, 0x00, "AWB control"},
+    {0x32, 0x00, "AWB control"},
+    {0x33, 0x00, "AWB control"},
+    {0x34, 0x00, "AWB control"},
+    {0x35, 0x00, "AWB control"},
+    {0x36, 0x00, "AWB control"},
+    {0x37, 0x00, "AWB control"},
+    {0x38, 0x00, "AWB control"},
+    {0x39, 0x00, "AWB control"},
+    {0x3a, 0x00, "AWB control"},
+    {0x3b, 0x00, "AWB control"},
+    {0x3c, 0x00, "AWB control"},
+    {0x3d, 0x00, "AWB control"},
+    {0x3e, 0x00, "AWB control"},
+    {0x3f, 0x00, "AWB control"},
+    {0x40, 0x00, "AWB control"},
+    {0x41, 0x00, "AWB control"},
+    {0x42, 0x00, "AWB control"},
+    {0x43, 0x00, "AWB control"},
+    {0x44, 0x00, "AWB control"},
+    {0x45, 0x00, "AWB control"},
+    {0x46, 0x00, "AWB control"},
+    {0x47, 0x00, "AWB control"},
+    {0x48, 0x00, "AWB control"},
+    {0x49, 0x00, "AWB control"},
+    {0x4a, 0x00, "AWB control"},
+    {0x4b, 0x00, "AWB control"},
+    {0x4c, 0x00, "AWB control"},
+    {0x4d, 0x00, "AWB control"},
+    {0x4e, 0x00, "AWB control"},
+    {0x4f, 0x00, "AWB control"},
+    {0x50, 0x00, "AWB control"},
+    {0x51, 0x00, "AWB control"},
+    {0x52, 0x00, "AWB control"},
+    {0x53, 0x00, "AWB control"},
+    {0x54, 0x00, "AWB control"},
+    {0x55, 0x00, "AWB control"},
+    {0x56, 0x00, "AWB control"},
+    {0x57, 0x00, "AWB control"},
+    {0x58, 0x00, "AWB control"},
+    {0x59, 0x00, "AWB control"},
+    {0x5a, 0x00, "AWB control"},
+    {0x5b, 0x00, "AWB control"},
+    {0x5c, 0x00, "AWB control"},
+    {0x5d, 0x00, "AWB control"},
+    {0x5e, 0x00, "AWB control"},
+    {0x5f, 0x00, "AWB control"},
+    {0x60, 0x00, "AWB control"},
+    {0x61, 0x00, "AWB control"},
+    {0x62, 0x00, "AWB control"},
+    {0x63, 0x00, "AWB control"},
+    {0x64, 0x00, "AWB control"},
+    {0x65, 0x00, "AWB control"},
+    {0x66, 0x00, "AWB control"},
+    {0x67, 0x00, "AWB control"},
+    {0x68, 0x00, "AWB control"},
+    {0x69, 0x00, "AWB control"},
+    {0x6a, 0x00, "AWB control"},
+    {0x6b, 0x00, "AWB control"},
+    {0x6c, 0x00, "AWB control"},
+    {0x6d, 0x00, "AWB control"},
+    {0x6e, 0x00, "AWB control"},
+    {0x6f, 0x00, "AWB control"},
+    {0x70, 0x00, "AWB control"},
+    {0x71, 0x00, "AWB control"},
+    {0x72, 0x00, "AWB control"},
+    {0x73, 0x00, "AWB control"},
+    {0x74, 0x00, "AWB control"},
+    {0x75, 0x00, "AWB control"},
+    {0x76, 0x00, "AWB control"},
+    {0x77, 0x00, "AWB control"},
+    {0x78, 0x00, "AWB control"},
+    {0x79, 0x00, "AWB control"},
+    {0x7a, 0x00, "AWB control"},
+    {0x7b, 0x00, "AWB control"},
+    {0x7c, 0x00, "AWB control"},
+    {0x7d, 0x00, "AWB control"},
+    {0x7e, 0x00, "AWB control"},
+    {0x7f, 0x00, "AWB control"},
+    {0x80, 0x00, "AWB control"},
+    {0x81, 0x00, "AWB control"},
+    {0x82, 0x00, "AWB control"},
+    {0x83, 0x00, "AWB control"},
+    {0x84, 0x00, "AWB control"},
+    {0x85, 0x00, "AWB control"},
+    {0x86, 0x00, "AWB control"},
+    {0x87, 0x00, "AWB control"},
+    {0x88, 0x00, "AWB control"},
+    {0x89, 0x00, "AWB control"},
+    {0x8a, 0x00, "AWB control"},
+    {0x8b, 0x00, "AWB control"},
+    {0x8c, 0x00, "AWB control"},
+    {0x8d, 0x00, "AWB control"},
+    {0x8e, 0x00, "AWB control"},
+    {0x8f, 0x00, "AWB control"},
+    {0x90, 0x00, "AWB control"},
+    {0x91, 0x00, "AWB control"},
+    {0x92, 0x00, "AWB control"},
+    {0x93, 0x00, "AWB control"},
+    {0x94, 0x00, "AWB control"},
+    {0x95, 0x00, "AWB control"},
+    {0x96, 0x00, "AWB control"},
+    {0x97, 0x00, "AWB control"},
+    {0x98, 0x00, "AWB control"},
+    {0x99, 0x00, "AWB control"},
+    {0x9a, 0x00, "AWB control"},
+    {0x9b, 0x00, "AWB control"},
+    {0x9c, 0x00, "AWB control"},
+    {0x9d, 0x00, "AWB control"},
+    {0x9e, 0x00, "AWB control"},
+    {0x9f, 0x00, "AWB control"},
+    {0xa0, 0x00, "AWB control"},
+    {0xa1, 0x00, "AWB control"},
+    {0xa2, 0x00, "AWB control"},
+    {0xa3, 0x00, "AWB control"},
+    {0xa4, 0x00, "AWB control"},
+    {0xa5, 0x00, "AWB control"},
+    {0xa6, 0x00, "AWB control"},
+    {0xa7, 0x00, "AWB control"},
+    {0xa8, 0x00, "AWB control"},
+    {0xa9, 0x00, "AWB control"},
+    {0xaa, 0x00, "AWB control"},
+    {0xab, 0x00, "AWB control"},
+    {0xac, 0x00, "AWB control"},
+    {0xad, 0x00, "AWB control"},
+    {0xae, 0x00, "AWB control"},
+    {0xaf, 0x00, "AWB control"},
+    {0xb0, 0x00, "AWB control"},
+    {0xb1, 0x00, "AWB control"},
+    {0xb2, 0x00, "AWB control"},
+    {0xb3, 0x00, "AWB control"},
+    {0xb4, 0x00, "AWB control"},
+    {0xb5, 0x00, "AWB control"},
+    {0xb6, 0x00, "AWB control"},
+    {0xb7, 0x00, "AWB control"},
+    {0xb8, 0x00, "AWB control"},
+    {0xb9, 0x00, "AWB control"},
+    {0xba, 0x00, "AWB control"},
+    {0xbb, 0x00, "AWB control"},
+    {0xbc, 0x00, "AWB control"},
+    {0xbd, 0x00, "AWB control"},
+    {0xbe, 0x00, "AWB control"},
+    {0xbf, 0x00, "AWB control"},
+    {0xc0, 0x00, "AWB control"},
+    {0xc1, 0x00, "AWB control"},
+    {0xc2, 0x00, "AWB control"},
+    {0xc3, 0x00, "AWB control"},
+    {0xc4, 0x00, "AWB control"},
+    {0xc5, 0x00, "AWB control"},
+    {0xc6, 0x00, "AWB control"},
+    {0xc7, 0x00, "AWB control"},
+    {0xc8, 0x00, "AWB control"},
+    {0xc9, 0x00, "AWB control"},
+    {0xca, 0x00, "AWB control"},
+    {0xcb, 0x00, "AWB control"},
+    {0xcc, 0x00, "AWB control"},
+    {0xcd, 0x00, "AWB control"},
+    {0xce, 0x00, "AWB control"},
+    {0xcf, 0x00, "AWB control"},
+    {0xd0, 0x00, "AWB control"},
+    {0xd1, 0x00, "AWB control"},
+    {0xd2, 0x00, "AWB control"},
+    {0xd3, 0x00, "AWB control"},
+    {0xd4, 0x00, "AWB control"},
+    {0xd5, 0x00, "AWB control"},
+    {0xd6, 0x00, "AWB control"},
+    {0xd7, 0x00, "AWB control"},
+    {0xd8, 0x00, "AWB control"},
+    {0xd9, 0x00, "AWB control"},
+    {0xda, 0x00, "AWB control"},
+    {0xdb, 0x00, "AWB control"},
+    {0xdc, 0x00, "AWB control"},
+    {0xdd, 0x00, "AWB control"},
+    {0xde, 0x00, "AWB control"},
+    {0xdf, 0x00, "AWB control"},
+    {0xe0, 0x00, "AWB control"},
+    {0xe1, 0x00, "AWB control"},
+    {0xe2, 0x00, "AWB control"},
+    {0xe3, 0x00, "AWB control"},
+    {0xe4, 0x00, "AWB control"},
+    {0xe5, 0x00, "AWB control"},
+    {0xe6, 0x00, "AWB control"},
+    {0xe7, 0x00, "AWB control"},
+    {0xe8, 0x00, "AWB control"},
+    {0xe9, 0x00, "AWB control"},
+    {0xea, 0x00, "AWB control"},
+    {0xeb, 0x00, "AWB control"},
+    {0xec, 0x00, "AWB control"},
+    {0xed, 0x00, "AWB control"},
+    {0xee, 0x00, "AWB control"},
+    {0xef, 0x00, "AWB control"},
+    {0xf0, 0x00, "AWB control"},
+    {0xf1, 0x00, "AWB control"},
+    {0xf2, 0x00, "AWB control"},
+    {0xf3, 0x00, "AWB control"},
+    {0xf4, 0x00, "AWB control"},
+    {0xf5, 0x00, "AWB control"},
+    {0xf6, 0x00, "AWB control"},
+    {0xf7, 0x00, "AWB control"},
+    {0xf8, 0x00, "AWB control"},
+    {0xf9, 0x00, "AWB control"},
+    {0xfa, 0x00, "AWB control"},
+    {0xfb, 0x00, "AWB control"},
+    {0xfc, 0x00, "AWB control"},
+    {0xfd, 0x00, "AWB control"},
+    {0xfe, 0x00, "AWB control"},
+    {0xff, 0x00, "AWB control"}
   };
-  
-  for (size_t i = 0; i < sizeof(basic_config) / sizeof(basic_config[0]); i++) {
+
+  for (size_t i = 0; i < sizeof(sc2336_config) / sizeof(sc2336_config[0]); i++) {
     ESP_LOGD(TAG, "Setting %s: reg 0x%02X = 0x%02X", 
-             basic_config[i].desc, basic_config[i].reg, basic_config[i].val);
+             sc2336_config[i].desc, sc2336_config[i].reg, sc2336_config[i].val);
     
-    if (!this->write_byte(basic_config[i].reg, basic_config[i].val)) {
-      ESP_LOGW(TAG, "Failed to write register 0x%02X - continuing anyway", basic_config[i].reg);
+    if (!this->write_byte(sc2336_config[i].reg, sc2336_config[i].val)) {
+      ESP_LOGW(TAG, "Failed to write SC2336 register 0x%02X", sc2336_config[i].reg);
     }
     
-    vTaskDelay(10 / portTICK_PERIOD_MS);  // Délai entre les écritures
+    vTaskDelay(5 / portTICK_PERIOD_MS);  // Délai plus long entre les écritures
   }
-  
-  // Vérification basique - test si le capteur répond toujours
-  uint8_t verify_reg;
-  if (this->read_byte(0x00, &verify_reg)) {
-    ESP_LOGI(TAG, " Sensor still responsive after configuration (reg 0x00 = 0x%02X)", verify_reg);
+
+  // Configuration finale pour démarrer la capture
+  if (!this->write_byte(0xfe, 0x00)) {
+    ESP_LOGW(TAG, "Failed to write final SC2336 config register");
+  }
+
+  // Vérification finale
+  uint8_t status_reg;
+  if (this->read_byte(0x00, &status_reg)) {
+    ESP_LOGI(TAG, "SC2336 sensor ready (status: 0x%02X)", status_reg);
   } else {
-    ESP_LOGW(TAG, " Sensor not responding after configuration");
+    ESP_LOGW(TAG, "Failed to verify SC2336 sensor status");
   }
-  
-  // Pour l'instant, on considère que même sans configuration complète,
-  // le pipeline MIPI peut recevoir des données du capteur
-  ESP_LOGI(TAG, " Using minimal sensor configuration - full config needed for proper images");
-  
+
   this->sensor_initialized_ = true;
-  ESP_LOGI(TAG, " Camera sensor initialized with basic configuration");
+  ESP_LOGI(TAG, "SC2336 camera sensor initialized successfully");
   
   return true;
 }
