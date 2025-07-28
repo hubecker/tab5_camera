@@ -130,6 +130,7 @@ float Tab5Camera::get_setup_priority() const {
 #ifdef HAS_ESP32_P4_CAMERA
 
 // NOUVELLE MÉTHODE: Configuration de l'horloge externe avec LEDC
+// MÉTHODE CORRIGÉE: Configuration de l'horloge externe avec LEDC
 bool Tab5Camera::setup_external_clock_() {
   if (this->external_clock_pin_ == 0) {
     ESP_LOGW(TAG, "No external clock pin configured");
@@ -146,7 +147,7 @@ bool Tab5Camera::setup_external_clock_() {
   ledc_timer_config_t timer_config = {};
   timer_config.duty_resolution = LEDC_TIMER_1_BIT;  // 1 bit = signal carré 50%
   timer_config.freq_hz = this->external_clock_frequency_;
-  timer_config.speed_mode = LEDC_HIGH_SPEED_MODE;  // High speed pour haute fréquence
+  timer_config.speed_mode = LEDC_LOW_SPEED_MODE;  // ← CORRECTION: Utiliser LOW_SPEED_MODE
   timer_config.timer_num = LEDC_TIMER_0;
   timer_config.clk_cfg = LEDC_AUTO_CLK;
   
@@ -161,7 +162,7 @@ bool Tab5Camera::setup_external_clock_() {
   channel_config.channel = LEDC_CHANNEL_0;
   channel_config.duty = 1;  // 50% duty cycle (1/2 pour 1-bit resolution)
   channel_config.gpio_num = clock_pin;
-  channel_config.speed_mode = LEDC_HIGH_SPEED_MODE;
+  channel_config.speed_mode = LEDC_LOW_SPEED_MODE;  // ← CORRECTION: Cohérent avec timer
   channel_config.hpoint = 0;
   channel_config.timer_sel = LEDC_TIMER_0;
   
