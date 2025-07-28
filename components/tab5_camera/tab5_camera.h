@@ -45,14 +45,14 @@ static constexpr uint16_t SC2356_CHIP_ID_L_REG = 0x3108;
 static constexpr uint16_t SC2356_CHIP_ID_VALUE = 0x2356;
 
 // Résolutions supportées par SC2356
-enum SC2356Resolution {
-  QVGA_320X240,
-  VGA_640X480,
-  SVGA_800X600,
-  HD_1280X720,
-  UXGA_1600X1200,
-  FHD_1920X1080
- };
+enum class SC2356Resolution {
+  QVGA_320x240,
+  VGA_640x480,
+  SVGA_800x600,
+  HD_1280x720,
+  UXGA_1600x1200,
+  FHD_1920x1080
+};
 
 // Formats de pixels supportés
 enum class SC2356PixelFormat {
@@ -223,7 +223,6 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
 
   bool write_bytes_raw_(const uint8_t *data, size_t len);
   bool read_bytes_raw_(uint8_t *data, size_t len);
-
 
   // Configuration SC2356
   bool configure_sc2356_();
