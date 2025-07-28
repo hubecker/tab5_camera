@@ -18,13 +18,13 @@ Tab5Camera = tab5_camera_ns.class_("Tab5Camera", cg.Component, i2c.I2CDevice)
 # Enums SC2356
 SC2356Resolution = tab5_camera_ns.enum("SC2356Resolution")
 SC2356_RESOLUTIONS = {
-    "QVGA": SC2356Resolution.QVGA_320x240,
-    "VGA": SC2356Resolution.VGA_640x480,
-    "SVGA": SC2356Resolution.SVGA_800x600,
-    "HD": SC2356Resolution.HD_1280x720,
+    "QVGA_320x240": SC2356Resolution.QVGA_320x240,
+    "VGA_640x480": SC2356Resolution.VGA_640x480,
+    "SVGA_800x600": SC2356Resolution.SVGA_800x600,
+    "HD_1280x720": SC2356Resolution.HD_1280x720,
+    "UXGA_1600x1200": SC2356Resolution.UXGA_1600x1200,
+    "FHD_1920x1080": SC2356Resolution.FHD_1920x1080,
     "720P": SC2356Resolution.HD_1280x720,
-    "UXGA": SC2356Resolution.UXGA_1600x1200,
-    "FHD": SC2356Resolution.FHD_1920x1080,
     "1080P": SC2356Resolution.FHD_1920x1080,
 }
 
@@ -49,74 +49,77 @@ CONF_ANALOG_GAIN = "analog_gain"
 CONF_DIGITAL_GAIN = "digital_gain"
 CONF_TEST_PATTERN = "test_pattern"
 
-# Validation de résolution
+# Validation stricte des clefs complètes
 def validate_resolution(value):
     if isinstance(value, str):
-        value = cv.one_of(*SC2356_RESOLUTIONS.keys(), upper=True)(value)
-        return value
-    return cv.invalid("Resolution must be one of: {}".format(", ".join(SC2356_RESOLUTIONS.keys())))
+        value = value.strip()
+        if value in SC2356_RESOLUTIONS:
+            return value
+        raise cv.Invalid(f"Invalid resolution '{value}', expected one of: {', '.join(SC2356_RESOLUTIONS.keys())}")
+    raise cv.Invalid("Resolution must be a string.")
 
-# Validation de format pixel
 def validate_pixel_format(value):
     if isinstance(value, str):
-        value = cv.one_of(*SC2356_PIXEL_FORMATS.keys(), upper=True)(value)
-        return value
-    return cv.invalid("Pixel format must be one of: {}".format(", ".join(SC2356_PIXEL_FORMATS.keys())))
+        value = value.strip().upper()
+        if value in SC2356_PIXEL_FORMATS:
+            return value
+        raise cv.Invalid(f"Invalid pixel format '{value}', expected one of: {', '.join(SC2356_PIXEL_FORMATS.keys())}")
+    raise cv.Invalid("Pixel format must be a string.")
 
 CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(Tab5Camera),
             cv.Optional(CONF_NAME, default="Tab5 Camera SC2356"): cv.string,
-            
-            # Configuration matérielle
+
+            # Hardware
             cv.Optional(CONF_EXTERNAL_CLOCK_PIN, default=36): cv.int_range(min=0, max=255),
             cv.Optional(CONF_EXTERNAL_CLOCK_FREQUENCY, default=24000000): cv.positive_int,
             cv.Optional(CONF_RESET_PIN): pins.gpio_output_pin_schema,
-            
-            # Configuration SC2356
-            cv.Optional(CONF_RESOLUTION, default="VGA"): validate_resolution,
+
+            # SC2356 config
+            cv.Optional(CONF_RESOLUTION, default="VGA_640x480"): validate_resolution,
             cv.Optional(CONF_PIXEL_FORMAT, default="RGB565"): validate_pixel_format,
             cv.Optional(CONF_JPEG_QUALITY, default=10): cv.int_range(min=1, max=63),
             cv.Optional(CONF_FRAMERATE, default=15): cv.int_range(min=5, max=30),
-            
-            # Paramètres avancés SC2356
-            cv.Optional(CONF_EXPOSURE_TIME, default=10000): cv.positive_int,  # µs
+
+            # Advanced
+            cv.Optional(CONF_EXPOSURE_TIME, default=10000): cv.positive_int,
             cv.Optional(CONF_ANALOG_GAIN, default=128): cv.int_range(min=64, max=512),
             cv.Optional(CONF_DIGITAL_GAIN, default=128): cv.int_range(min=64, max=512),
             cv.Optional(CONF_TEST_PATTERN, default=False): cv.boolean,
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
-    .extend(i2c.i2c_device_schema(0x43))  # SC2356 adresse fixe
+    .extend(i2c.i2c_device_schema(0x43))  # Adresse I2C fixe
 )
 
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await i2c.register_i2c_device(var, config)
-    
-    # Configuration de base
+
+    # Base
     cg.add(var.set_name(config[CONF_NAME]))
     cg.add(var.set_external_clock_pin(config[CONF_EXTERNAL_CLOCK_PIN]))
     cg.add(var.set_external_clock_frequency(config[CONF_EXTERNAL_CLOCK_FREQUENCY]))
-    
-    # Configuration SC2356 spécifique
+
+    # SC2356 config
     cg.add(var.set_resolution(SC2356_RESOLUTIONS[config[CONF_RESOLUTION]]))
     cg.add(var.set_pixel_format(SC2356_PIXEL_FORMATS[config[CONF_PIXEL_FORMAT]]))
     cg.add(var.set_jpeg_quality(config[CONF_JPEG_QUALITY]))
     cg.add(var.set_framerate(config[CONF_FRAMERATE]))
-    
-    # Paramètres avancés
+
+    # Avancés
     cg.add(var.set_exposure_time(config[CONF_EXPOSURE_TIME]))
     cg.add(var.set_analog_gain(config[CONF_ANALOG_GAIN]))
     cg.add(var.set_digital_gain(config[CONF_DIGITAL_GAIN]))
     cg.add(var.set_test_pattern(config[CONF_TEST_PATTERN]))
-    
-    # Pin de reset (optionnel)
+
     if CONF_RESET_PIN in config:
         reset_pin = await cg.gpio_pin_expression(config[CONF_RESET_PIN])
         cg.add(var.set_reset_pin(reset_pin))
+
 
 
 
