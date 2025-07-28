@@ -151,12 +151,11 @@ bool Tab5Camera::init_ldo_() {
 
 // NOUVELLE MÉTHODE: Détection automatique du capteur
 uint16_t Tab5Camera::detect_sensor_id_() {
-  ESP_LOGI(TAG, "Detecting Tab5 camera sensor...");
-  
-  // Test des adresses I2C connues pour Tab5
+  ESP_LOGI(TAG, "🔍 Detecting Tab5 camera sensor...");
+
   const struct {
     uint8_t address;
-    const char* name;
+    const char *name;
     uint16_t id_reg_high;
     uint16_t id_reg_low;
     uint16_t expected_id;
@@ -164,56 +163,49 @@ uint16_t Tab5Camera::detect_sensor_id_() {
     {OV5645_SCCB_ADDR, "OV5645", 0x300A, 0x300B, OV5645_CHIP_ID},
     {SC2336_SCCB_ADDR, "SC2336", 0x3107, 0x3108, SC2336_CHIP_ID},
     {SC2356_SCCB_ADDR, "SC2356", 0x3107, 0x3108, SC2356_CHIP_ID},
-    // Adresses alternatives
     {0x78, "OV5645_ALT", 0x300A, 0x300B, OV5645_CHIP_ID},
     {0x60, "SC2336_ALT", 0x3107, 0x3108, SC2336_CHIP_ID},
   };
-  
-  for (size_t i = 0; i < sizeof(sensor_configs) / sizeof(sensor_configs[0]); i++) {
-    ESP_LOGI(TAG, "Testing %s at I2C address 0x%02X...", 
-             sensor_configs[i].name, sensor_configs[i].address);
-    
-    // Temporairement changer l'adresse pour le test
-    uint8_t original_addr = this->address_;
-    this->address_ = sensor_configs[i].address;
-    
-    // Test de communication basique
-    if (!this->test_sensor_communication_(sensor_configs[i].address)) {
-      this->address_ = original_addr;
+
+  uint8_t original_addr = this->address_;
+
+  for (size_t i = 0; i < sizeof(sensor_configs) / sizeof(*sensor_configs); i++) {
+    const auto &cfg = sensor_configs[i];
+
+    ESP_LOGI(TAG, "Testing %s at I2C address 0x%02X...", cfg.name, cfg.address);
+    this->address_ = cfg.address;
+
+    if (!this->test_sensor_communication_(cfg.address)) {
+      ESP_LOGW(TAG, "No response from %s at 0x%02X", cfg.name, cfg.address);
+      vTaskDelay(30 / portTICK_PERIOD_MS);
       continue;
     }
-    
-    // Lecture des registres d'ID
-    uint8_t id_high, id_low;
-    if (this->read_byte_16(sensor_configs[i].id_reg_high, &id_high) && 
-        this->read_byte_16(sensor_configs[i].id_reg_low, &id_low)) {
-      
-      uint16_t sensor_id = (id_high << 8) | id_low;
-      ESP_LOGI(TAG, "%s ID registers: 0x%04X=0x%02X, 0x%04X=0x%02X, Combined ID=0x%04X", 
-               sensor_configs[i].name,
-               sensor_configs[i].id_reg_high, id_high, 
-               sensor_configs[i].id_reg_low, id_low, 
-               sensor_id);
-      
-      if (sensor_id == sensor_configs[i].expected_id) {
-        ESP_LOGI(TAG, "✅ Detected %s sensor (ID: 0x%04X) at address 0x%02X", 
-                 sensor_configs[i].name, sensor_id, sensor_configs[i].address);
-        
-        // Sauvegarder les informations du capteur détecté
-        this->detected_sensor_id_ = sensor_id;
-        this->detected_sensor_address_ = sensor_configs[i].address;
-        
-        // Garder cette adresse pour la suite
-        return sensor_id;
-      }
+
+    uint8_t id_high = 0, id_low = 0;
+    bool high_ok = this->read_byte_16(cfg.id_reg_high, &id_high);
+    bool low_ok = this->read_byte_16(cfg.id_reg_low, &id_low);
+
+    if (!high_ok || !low_ok) {
+      ESP_LOGW(TAG, "Failed to read ID registers for %s at 0x%02X", cfg.name, cfg.address);
+      vTaskDelay(30 / portTICK_PERIOD_MS);
+      continue;
     }
-    
-    // Restaurer l'adresse originale si pas de match
-    this->address_ = original_addr;
-    vTaskDelay(50 / portTICK_PERIOD_MS);
+
+    uint16_t sensor_id = (id_high << 8) | id_low;
+    ESP_LOGI(TAG, "%s ID: 0x%04X (expected: 0x%04X)", cfg.name, sensor_id, cfg.expected_id);
+
+    if (sensor_id == cfg.expected_id) {
+      ESP_LOGI(TAG, "✅ Detected %s sensor (ID: 0x%04X) at address 0x%02X", cfg.name, sensor_id, cfg.address);
+      this->detected_sensor_id_ = sensor_id;
+      this->detected_sensor_address_ = cfg.address;
+      return sensor_id;
+    }
+
+    vTaskDelay(30 / portTICK_PERIOD_MS);
   }
-  
-  ESP_LOGE(TAG, "❌ No compatible Tab5 sensor detected!");
+
+  this->address_ = original_addr;
+  ESP_LOGE(TAG, "❌ No compatible Tab5 camera sensor detected!");
   return 0;
 }
 
