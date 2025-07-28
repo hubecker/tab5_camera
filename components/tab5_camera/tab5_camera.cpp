@@ -151,85 +151,168 @@ bool Tab5Camera::init_sensor_() {
   
   ESP_LOGI(TAG, "Attempting to initialize camera sensor at I2C address 0x%02X", this->address_);
   
-  // Test de communication I2C approfondi
+  // Test simple de communication I2C (registres 8 bits basiques)
   uint8_t test_data;
   bool sensor_detected = false;
-  
-  // Test de plusieurs registres communs (8-bit seulement)
-  const uint8_t test_regs[] = {0x00, 0x01, 0x02, 0x0A, 0x0B, 0x0C, 0x0D};
-  for (size_t i = 0; i < sizeof(test_regs); i++) {
-    if (this->read_byte(test_regs[i], &test_data)) {
-      ESP_LOGI(TAG, "Sensor responded: reg 0x%02X = 0x%02X", test_regs[i], test_data);
+  const uint8_t test_regs8[] = {0x00, 0x01, 0x02, 0x0A, 0x0B, 0x0C, 0x0D};
+  for (size_t i = 0; i < sizeof(test_regs8); i++) {
+    if (this->read_byte_8(test_regs8[i], &test_data)) {
+      ESP_LOGI(TAG, "Sensor responded: reg 0x%02X = 0x%02X", test_regs8[i], test_data);
       sensor_detected = true;
     }
   }
   
   if (!sensor_detected) {
     ESP_LOGE(TAG, "❌ No sensor detected at I2C address 0x%02X - check wiring!", this->address_);
-    return false;  // ← Maintenant on échoue si pas de capteur
+    return false;
   }
-  
-  // Tentative d'identification du capteur
-  uint8_t id_reg_1, id_reg_2;
-  if (this->read_byte(0x00, &id_reg_1) && this->read_byte(0x01, &id_reg_2)) {
-    uint16_t sensor_id = (id_reg_1 << 8) | id_reg_2;
-    ESP_LOGI(TAG, "🔍 Sensor ID: 0x%04X (reg 0x00=0x%02X, reg 0x01=0x%02X)", 
-             sensor_id, id_reg_1, id_reg_2);
+
+  // Lecture de l'ID du capteur (registres 16 bits pour SC2336)
+  uint8_t id_hi = 0, id_lo = 0;
+  if (!this->read_byte(0x3107, &id_hi) || !this->read_byte(0x3108, &id_lo)) {
+    ESP_LOGW(TAG, "Failed to read SC2336 ID registers");
+    return false;
+  }
+  uint16_t sensor_id = (id_hi << 8) | id_lo;
+  ESP_LOGI(TAG, "🔍 Sensor ID read from 0x3107/0x3108: 0x%04X", sensor_id);
+
+  if (sensor_id == 0x2336) {
+    ESP_LOGI(TAG, "📷 Detected SC2336 sensor - applying init sequence");
+
+    // Séquence d'initialisation simplifiée SC2336 (exemple)
+    typedef struct {
+        uint16_t reg;
+        uint8_t  val;
+    } RegVal;
     
-    // Identification basée sur l'ID
-    switch (sensor_id) {
-      case 0x00A2: ESP_LOGI(TAG, "📷 Detected: Possible OmniVision sensor (partial ID match)"); break;
-      case 0x2640: ESP_LOGI(TAG, "📷 Detected: OV2640 sensor"); break;
-      case 0x5640: ESP_LOGI(TAG, "📷 Detected: OV5640 sensor"); break;
-      case 0x5645: ESP_LOGI(TAG, "📷 Detected: OV5645 sensor (but driver not enabled)"); break;
-      default: ESP_LOGI(TAG, "📷 Unknown sensor - will use generic configuration"); break;
+    static const RegVal sc2336_init_seq[] = {
+        {0x0103, 0x01}, {0x0100, 0x00}, // Reset + sortir du sommeil
+        {0x36e9, 0x80}, {0x37f9, 0x80},
+        {0x301f, 0x2d}, {0x3106, 0x05},
+        {0x3200, 0x01}, {0x3201, 0x34},
+        {0x3202, 0x00}, {0x3203, 0xb4},
+        {0x3204, 0x06}, {0x3205, 0x53},
+        {0x3206, 0x03}, {0x3207, 0x8b},
+        {0x3208, 0x05}, {0x3209, 0x00},
+        {0x320a, 0x02}, {0x320b, 0xd0},
+        {0x320c, 0x07}, {0x320d, 0x08},
+        {0x320e, 0x07}, {0x320f, 0x08},
+        {0x3210, 0x00}, {0x3211, 0x10},
+        {0x3212, 0x00}, {0x3213, 0x04},
+        {0x3248, 0x04}, {0x3249, 0x0b},
+        {0x3253, 0x08}, {0x3301, 0x09},
+        {0x3302, 0xff}, {0x3303, 0x10},
+        {0x3306, 0x60}, {0x3307, 0x02},
+        {0x330a, 0x01}, {0x330b, 0x10},
+        {0x330c, 0x16}, {0x330d, 0xff},
+        {0x3318, 0x02}, {0x3321, 0x0a},
+        {0x3327, 0x0e}, {0x332b, 0x12},
+        {0x3333, 0x10}, {0x3334, 0x40},
+        {0x335e, 0x06}, {0x335f, 0x0a},
+        {0x3364, 0x1f}, {0x337c, 0x02},
+        {0x337d, 0x0e}, {0x3390, 0x09},
+        {0x3391, 0x0f}, {0x3392, 0x1f},
+        {0x3393, 0x20}, {0x3394, 0x20},
+        {0x3395, 0x30}, {0x33a2, 0x04},
+        {0x33b1, 0x80}, {0x33b2, 0x68},
+        {0x33b3, 0x42}, {0x33f9, 0x70},
+        {0x33fb, 0xd0}, {0x33fc, 0x0f},
+        {0x33fd, 0x1f}, {0x349f, 0x03},
+        {0x34a6, 0x0f}, {0x34a7, 0x1f},
+        {0x34a8, 0x42}, {0x34a9, 0x06},
+        {0x34aa, 0x01}, {0x34ab, 0x23},
+        {0x34ac, 0x01}, {0x34ad, 0x84},
+        {0x3630, 0xf4}, {0x3633, 0x22},
+        {0x3639, 0xf4}, {0x363c, 0x47},
+        {0x3641, 0x03}, // PAD driving
+        {0x3670, 0x09}, {0x3674, 0xf4},
+        {0x3675, 0xfb}, {0x3676, 0xed},
+        {0x367c, 0x09}, {0x367d, 0x0f},
+        {0x3690, 0x33}, {0x3691, 0x33},
+        {0x3692, 0x43}, {0x3698, 0x89},
+        {0x3699, 0x96}, {0x369a, 0xd0},
+        {0x369b, 0xd0}, {0x369c, 0x09},
+        {0x369d, 0x0f}, {0x36a2, 0x09},
+        {0x36a3, 0x0f}, {0x36a4, 0x1f},
+        {0x36d0, 0x01}, {0x36ea, 0x09},
+        {0x36eb, 0x0c}, {0x36ec, 0x1c},
+        {0x36ed, 0x28}, {0x3722, 0xe1},
+        {0x3724, 0x41}, {0x3725, 0xc1},
+        {0x3728, 0x20}, {0x37fa, 0x09},
+        {0x37fb, 0x32}, {0x37fc, 0x11},
+        {0x37fd, 0x37}, {0x3900, 0x0d},
+        {0x3905, 0x98}, {0x391b, 0x81},
+        {0x391c, 0x10}, {0x3933, 0x81},
+        {0x3934, 0xc5}, {0x3940, 0x68},
+        {0x3941, 0x00}, {0x3942, 0x01},
+        {0x3943, 0xc6}, {0x3952, 0x02},
+        {0x3953, 0x0f}, {0x3e01, 0x70},
+        {0x3e02, 0x20}, {0x3e08, 0x1f},
+        {0x3e1b, 0x14}, {0x440e, 0x02},
+        {0x4509, 0x38}, {0x4819, 0x06},
+        {0x481b, 0x03}, {0x481d, 0x0b},
+        {0x481f, 0x03}, {0x4821, 0x08},
+        {0x4823, 0x03}, {0x4825, 0x03},
+        {0x4827, 0x03}, {0x4829, 0x05},
+        {0x5799, 0x06}, {0x5ae0, 0xfe},
+        {0x5ae1, 0x40}, {0x5ae2, 0x30},
+        {0x5ae3, 0x28}, {0x5ae4, 0x20},
+        {0x5ae5, 0x30}, {0x5ae6, 0x28},
+        {0x5ae7, 0x20}, {0x5ae8, 0x3c},
+        {0x5ae9, 0x30}, {0x5aea, 0x28},
+        {0x5aeb, 0x3c}, {0x5aec, 0x30},
+        {0x5aed, 0x28}, {0x5aee, 0xfe},
+        {0x5aef, 0x40}, {0x5af4, 0x30},
+        {0x5af5, 0x28}, {0x5af6, 0x20},
+        {0x5af7, 0x30}, {0x5af8, 0x28},
+        {0x5af9, 0x20}, {0x5afa, 0x3c},
+        {0x5afb, 0x30}, {0x5afc, 0x28},
+        {0x5afd, 0x3c}, {0x5afe, 0x30},
+        {0x5aff, 0x28}, {0x36e9, 0x53},
+        {0x37f9, 0x53},
+        {0xFFFF, 0x00}, // Fin de la table
+    };
+
+
+    for (auto &r : sc2336_init_seq) {
+      if (!this->write_byte(r.reg, r.val)) {
+        ESP_LOGW(TAG, "Failed to write SC2336 reg 0x%04X", r.reg);
+      }
+      vTaskDelay(5 / portTICK_PERIOD_MS);
     }
+
+    this->sensor_initialized_ = true;
+    ESP_LOGI(TAG, "✅ SC2336 sensor initialized successfully");
+    return true;
   }
-  
-  // Configuration minimale pour démarrer la capture
-  ESP_LOGI(TAG, "🔧 Configuring sensor for basic operation...");
-  
-  // Configuration basique générique - éviter les registres problématiques
-  const struct {
-    uint8_t reg;
-    uint8_t val;
-    const char* desc;
-  } basic_config[] = {
-    // Configuration très basique, éviter 0x12 (reset) qui pose problème
-    {0x09, 0x00, "System control"},         // Mode normal
-    {0x15, 0x00, "Output format"},          // Format par défaut
-    {0x3A, 0x04, "TSLB register"},          // Output sequence
-    // Configuration minimale pour test
-  };
-  
-  for (size_t i = 0; i < sizeof(basic_config) / sizeof(basic_config[0]); i++) {
-    ESP_LOGD(TAG, "Setting %s: reg 0x%02X = 0x%02X", 
-             basic_config[i].desc, basic_config[i].reg, basic_config[i].val);
-    
-    if (!this->write_byte(basic_config[i].reg, basic_config[i].val)) {
-      ESP_LOGW(TAG, "Failed to write register 0x%02X - continuing anyway", basic_config[i].reg);
+  else {
+    ESP_LOGW(TAG, "Unknown sensor ID 0x%04X - generic config will be applied", sensor_id);
+
+    // Configuration minimale générique (8 bits, compatible avec capteurs basiques)
+    const struct {
+      uint8_t reg;
+      uint8_t val;
+      const char* desc;
+    } basic_config[] = {
+      {0x09, 0x00, "System control"},
+      {0x15, 0x00, "Output format"},
+      {0x3A, 0x04, "TSLB register"},
+    };
+    for (size_t i = 0; i < sizeof(basic_config) / sizeof(basic_config[0]); i++) {
+      ESP_LOGD(TAG, "Setting %s: reg 0x%02X = 0x%02X", 
+               basic_config[i].desc, basic_config[i].reg, basic_config[i].val);
+      if (!this->write_byte_8(basic_config[i].reg, basic_config[i].val)) {
+        ESP_LOGW(TAG, "Failed to write register 0x%02X", basic_config[i].reg);
+      }
+      vTaskDelay(10 / portTICK_PERIOD_MS);
     }
-    
-    vTaskDelay(10 / portTICK_PERIOD_MS);  // Délai entre les écritures
+
+    this->sensor_initialized_ = true;
+    ESP_LOGI(TAG, "✅ Sensor initialized with basic generic configuration");
+    return true;
   }
-  
-  // Vérification basique - test si le capteur répond toujours
-  uint8_t verify_reg;
-  if (this->read_byte(0x00, &verify_reg)) {
-    ESP_LOGI(TAG, "✅ Sensor still responsive after configuration (reg 0x00 = 0x%02X)", verify_reg);
-  } else {
-    ESP_LOGW(TAG, "⚠️ Sensor not responding after configuration");
-  }
-  
-  // Pour l'instant, on considère que même sans configuration complète,
-  // le pipeline MIPI peut recevoir des données du capteur
-  ESP_LOGI(TAG, "ℹ️ Using minimal sensor configuration - full config needed for proper images");
-  
-  this->sensor_initialized_ = true;
-  ESP_LOGI(TAG, "✅ Camera sensor initialized with basic configuration");
-  
-  return true;
 }
+
 
 bool Tab5Camera::init_camera_() {
   if (this->camera_initialized_) {
