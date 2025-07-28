@@ -13,9 +13,9 @@
 #define SC2356_CHIP_ID    0x2356
 
 // Adresses I2C des capteurs
-#define OV5645_SCCB_ADDR  0x3C
-#define SC2336_SCCB_ADDR  0x30  
-#define SC2356_SCCB_ADDR  0x30
+#define OV5645_SCCB_ADDR  0x43
+#define SC2336_SCCB_ADDR  0x43 
+#define SC2356_SCCB_ADDR  0x43
 
 // Vérification spécifique pour ESP32-P4
 #if defined(CONFIG_IDF_TARGET_ESP32P4) || (defined(CONFIG_IDF_TARGET) && defined(CONFIG_IDF_TARGET_ESP32P4))
