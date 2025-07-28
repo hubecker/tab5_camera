@@ -244,14 +244,14 @@ uint16_t Tab5Camera::detect_sensor_id_() {
     uint16_t id_reg_low;
     uint16_t expected_id;
   } sensor_configs[] = {
-    {0x3C, "OV5645", 0x300A, 0x300B, OV5645_CHIP_ID},
-    {0x30, "SC2336", 0x3107, 0x3108, SC2336_CHIP_ID}, 
-    {0x30, "SC2356", 0x3107, 0x3108, SC2356_CHIP_ID},
+    {0x43, "OV5645", 0x300A, 0x300B, OV5645_CHIP_ID},
+    {0x43, "SC2336", 0x3107, 0x3108, SC2336_CHIP_ID}, 
+    {0x43, "SC2356", 0x3107, 0x3108, SC2356_CHIP_ID},
     // Capteurs à des adresses alternatives courantes
-    {0x78, "OV5645_ALT", 0x300A, 0x300B, OV5645_CHIP_ID},
-    {0x60, "SC2336_ALT", 0x3107, 0x3108, SC2336_CHIP_ID},
-    {0x20, "Sensor_Test1", 0x0000, 0x0001, 0x0000}, // Test générique
-    {0x1A, "Sensor_Test2", 0x0000, 0x0001, 0x0000}, // Autres tests
+    {0x43, "OV5645_ALT", 0x300A, 0x300B, OV5645_CHIP_ID},
+    {0x43, "SC2336_ALT", 0x3107, 0x3108, SC2336_CHIP_ID},
+    {0x43, "Sensor_Test1", 0x0000, 0x0001, 0x0000}, // Test générique
+    {0x43, "Sensor_Test2", 0x0000, 0x0001, 0x0000}, // Autres tests
   };
 
   uint8_t original_addr = this->address_;
