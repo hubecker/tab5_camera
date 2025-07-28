@@ -181,6 +181,7 @@ bool Tab5Camera::init_sensor_() {
       case 0x00A2: ESP_LOGI(TAG, "📷 Detected: Possible OmniVision sensor (partial ID match)"); break;
       case 0x2640: ESP_LOGI(TAG, "📷 Detected: OV2640 sensor"); break;
       case 0x5640: ESP_LOGI(TAG, "📷 Detected: OV5640 sensor"); break;
+      case 0x5645: ESP_LOGI(TAG, "📷 Detected: OV5645 sensor (but driver not enabled)"); break;
       default: ESP_LOGI(TAG, "📷 Unknown sensor - will use generic configuration"); break;
     }
   }
