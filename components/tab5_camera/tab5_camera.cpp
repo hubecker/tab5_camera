@@ -155,8 +155,8 @@ bool Tab5Camera::init_sensor_() {
   uint8_t test_data;
   bool sensor_detected = false;
   
-  // Test de plusieurs registres communs
-  const uint8_t test_regs[] = {0x00, 0x01, 0x02, 0x0A, 0x0B, 0x300A, 0x300B};
+  // Test de plusieurs registres communs (8-bit seulement)
+  const uint8_t test_regs[] = {0x00, 0x01, 0x02, 0x0A, 0x0B, 0x0C, 0x0D};
   for (size_t i = 0; i < sizeof(test_regs); i++) {
     if (this->read_byte(test_regs[i], &test_data)) {
       ESP_LOGI(TAG, "Sensor responded: reg 0x%02X = 0x%02X", test_regs[i], test_data);
@@ -175,39 +175,35 @@ bool Tab5Camera::init_sensor_() {
   // Configuration basique générique (à adapter selon votre capteur exact)
   // Ces registres sont communs à beaucoup de capteurs MIPI
   const struct {
-    uint16_t reg;
+    uint8_t reg;
     uint8_t val;
     const char* desc;
   } basic_config[] = {
-    // Exemple de configuration basique - À ADAPTER selon votre capteur !
-    {0x0100, 0x00, "Stream off"},           // Arrêter le streaming
-    {0x0103, 0x01, "Software reset"},       // Reset logiciel
+    // Configuration basique 8-bit - À ADAPTER selon votre capteur !
+    {0x12, 0x80, "Software reset"},         // Reset commun
+    {0x09, 0x10, "System control"},         // Control général
+    {0x15, 0x00, "Output format"},          // Format de sortie
     // Vous devez ajouter ici la configuration spécifique à votre capteur
-    // {0x3008, 0x82, "System control"},    // Exemple pour OV2640
-    // {0x3103, 0x03, "System control"},    // Exemple pour OV2640
-    {0x0100, 0x01, "Stream on"},            // Démarrer le streaming
+    // Ces valeurs sont des exemples génériques
   };
   
   for (size_t i = 0; i < sizeof(basic_config) / sizeof(basic_config[0]); i++) {
-    ESP_LOGD(TAG, "Setting %s: reg 0x%04X = 0x%02X", 
+    ESP_LOGD(TAG, "Setting %s: reg 0x%02X = 0x%02X", 
              basic_config[i].desc, basic_config[i].reg, basic_config[i].val);
     
     if (!this->write_byte(basic_config[i].reg, basic_config[i].val)) {
-      ESP_LOGW(TAG, "Failed to write register 0x%04X", basic_config[i].reg);
+      ESP_LOGW(TAG, "Failed to write register 0x%02X", basic_config[i].reg);
     }
     
     vTaskDelay(10 / portTICK_PERIOD_MS);  // Délai entre les écritures
   }
   
-  // Vérification que le streaming est activé
-  uint8_t stream_status;
-  if (this->read_byte(0x0100, &stream_status)) {
-    ESP_LOGI(TAG, "Stream status register: 0x%02X", stream_status);
-    if (stream_status & 0x01) {
-      ESP_LOGI(TAG, "✅ Sensor streaming enabled");
-    } else {
-      ESP_LOGW(TAG, "⚠️ Sensor streaming might not be enabled");
-    }
+  // Vérification basique - test si le capteur répond toujours
+  uint8_t verify_reg;
+  if (this->read_byte(0x00, &verify_reg)) {
+    ESP_LOGI(TAG, "✅ Sensor still responsive after configuration (reg 0x00 = 0x%02X)", verify_reg);
+  } else {
+    ESP_LOGW(TAG, "⚠️ Sensor not responding after configuration");
   }
   
   this->sensor_initialized_ = true;
@@ -631,7 +627,6 @@ void Tab5Camera::streaming_loop_() {
 }  // namespace esphome
 
 #endif  // USE_ESP32
-
 
 
 
