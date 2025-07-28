@@ -6,8 +6,7 @@
 #include "esp_cam_ctlr_csi.h"
 
 // Ajout des includes pour les capteurs ESP-IDF
-#include "esp_sccb_intf.h"
-#include "esp_sccb_i2c.h"
+
 #include "esp_cam_sensor.h"
 
 #ifdef CONFIG_CAMERA_OV5645
