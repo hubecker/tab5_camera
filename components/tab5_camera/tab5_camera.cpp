@@ -6,9 +6,6 @@
 #include "esp_cam_ctlr_csi.h"
 
 // Ajout des includes pour les capteurs ESP-IDF
-
-
-
 #ifdef CONFIG_CAMERA_OV5645
 #include "ov5645.h"
 #endif
@@ -28,6 +25,21 @@ static const char *const TAG = "tab5_camera";
 #define TAB5_ISP_CLOCK_HZ 50000000  
 #define TAB5_STREAMING_STACK_SIZE 8192
 #define TAB5_FRAME_QUEUE_LENGTH 8
+
+// Définition des types de capteurs
+enum SensorType {
+  SENSOR_UNKNOWN = 0,
+  SENSOR_OV5645 = 1,
+  SENSOR_SC2336 = 2,
+  SENSOR_GENERIC = 3
+};
+
+// Structure pour les données de frame
+struct FrameData {
+  void* buffer;
+  size_t size;
+  int64_t timestamp;
+};
 
 namespace esphome {
 namespace tab5_camera {
@@ -63,7 +75,7 @@ void Tab5Camera::setup() {
   
   // Configuration du pin de l'horloge externe
   if (this->external_clock_pin_ > 0) {
-    ESP_LOGD(TAG, "Configuring external clock on GPIO%u at %u Hz", 
+    ESP_LOGD(TAG, "Configuring external clock on GPIO%u at %uHz", 
              this->external_clock_pin_, this->external_clock_frequency_);
   }
   
@@ -104,7 +116,7 @@ void Tab5Camera::dump_config() {
   ESP_LOGCONFIG(TAG, "  Resolution: %dx%d", TAB5_CAMERA_H_RES, TAB5_CAMERA_V_RES);
   if (this->external_clock_pin_ > 0) {
     ESP_LOGCONFIG(TAG, "  External Clock Pin: GPIO%u", this->external_clock_pin_);
-    ESP_LOGCONFIG(TAG, "  External Clock Frequency: %u Hz", this->external_clock_frequency_);
+    ESP_LOGCONFIG(TAG, "  External Clock Frequency: %uHz", this->external_clock_frequency_);
   }
   ESP_LOGCONFIG(TAG, "  Frame Buffer Size: %zu bytes", this->frame_buffer_size_);
   ESP_LOGCONFIG(TAG, "  Streaming Support: Available");
@@ -114,9 +126,9 @@ void Tab5Camera::dump_config() {
     LOG_PIN("  Reset Pin: ", this->reset_pin_);
   }
   
-  // Afficher le type de capteur détecté
-  if (this->sensor_type_ != SENSOR_UNKNOWN) {
-    ESP_LOGCONFIG(TAG, "  Detected Sensor: %s", this->get_sensor_name());
+  // Afficher le type de capteur détecté si disponible
+  if (this->sensor_detected_) {
+    ESP_LOGCONFIG(TAG, "  Detected Sensor: %s", this->get_sensor_name_());
   }
 #else
   ESP_LOGCONFIG(TAG, "    HAS_ESP32_P4_CAMERA: NO");
@@ -134,7 +146,7 @@ float Tab5Camera::get_setup_priority() const {
 
 #ifdef HAS_ESP32_P4_CAMERA
 
-const char* Tab5Camera::get_sensor_name() const {
+const char* Tab5Camera::get_sensor_name_() const {
   switch (this->sensor_type_) {
     case SENSOR_OV5645: return "OV5645";
     case SENSOR_SC2336: return "SC2336";
@@ -196,6 +208,7 @@ bool Tab5Camera::detect_and_init_sensor_() {
   this->cam_sensor_ = ov5645_detect(&sensor_config);
   if (this->cam_sensor_ != nullptr) {
     this->sensor_type_ = SENSOR_OV5645;
+    this->sensor_detected_ = true;
     ESP_LOGI(TAG, "📷 OV5645 sensor detected and initialized!");
     return true;
   }
@@ -207,6 +220,7 @@ bool Tab5Camera::detect_and_init_sensor_() {
   this->cam_sensor_ = sc2336_detect(&sensor_config);
   if (this->cam_sensor_ != nullptr) {
     this->sensor_type_ = SENSOR_SC2336;
+    this->sensor_detected_ = true;
     ESP_LOGI(TAG, "📷 SC2336 sensor detected and initialized!");
     return true;
   }
@@ -290,6 +304,7 @@ bool Tab5Camera::init_generic_sensor_() {
   }
   
   this->sensor_type_ = SENSOR_GENERIC;
+  this->sensor_detected_ = true;
   ESP_LOGI(TAG, "ℹ️ Using minimal sensor configuration - full config needed for proper images");
   ESP_LOGI(TAG, "✅ Generic sensor initialized with basic configuration");
   
