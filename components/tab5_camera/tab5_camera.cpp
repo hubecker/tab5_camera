@@ -256,14 +256,10 @@ bool Tab5Camera::read_sc2356_register_(uint16_t reg, uint8_t *value) {
   uint8_t reg_addr[2] = {static_cast<uint8_t>((reg >> 8) & 0xFF), 
                          static_cast<uint8_t>(reg & 0xFF)};
   
-  // Utiliser les méthodes I2C d'ESPHome
-  if (!this->write_bytes_raw(reg_addr, 2)) {
-    ESP_LOGD(TAG, "Failed to write register address 0x%04X", reg);
-    return false;
-  }
-  
-  if (!this->read_bytes_raw(value, 1)) {
-    ESP_LOGD(TAG, "Failed to read from SC2356 register 0x%04X", reg);
+  // Utiliser les méthodes I2C standards d'ESPHome
+  if (!this->write_bytes(reg_addr, 2) ||  // ← CORRECTION: write_bytes au lieu de write_bytes_raw
+      !this->read_bytes_raw(value, 1)) {
+    ESP_LOGD(TAG, "Failed to read SC2356 register 0x%04X", reg);
     return false;
   }
   
@@ -276,7 +272,7 @@ bool Tab5Camera::write_sc2356_register_(uint16_t reg, uint8_t value) {
                      static_cast<uint8_t>(reg & 0xFF), 
                      value};
   
-  if (!this->write_bytes_raw(data, 3)) {
+  if (!this->write_bytes(data, 3)) {  // ← CORRECTION: write_bytes au lieu de write_bytes_raw
     ESP_LOGD(TAG, "Failed to write SC2356 register 0x%04X = 0x%02X", reg, value);
     return false;
   }
@@ -284,6 +280,7 @@ bool Tab5Camera::write_sc2356_register_(uint16_t reg, uint8_t value) {
   ESP_LOGV(TAG, "SC2356 reg 0x%04X <= 0x%02X", reg, value);
   return true;
 }
+
 
 
 bool Tab5Camera::write_sc2356_register_16_(uint16_t reg, uint16_t value) {
