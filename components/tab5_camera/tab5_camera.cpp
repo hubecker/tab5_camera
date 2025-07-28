@@ -5,6 +5,16 @@
 #include "esp_timer.h"
 #include "esp_cam_ctlr_csi.h"
 
+#if CONFIG_CAMERA_OV5645
+#include "ov5645.h"
+#define SCCB0_CAM_DEVICE_ADDR OV5645_SCCB_ADDR
+#elif CONFIG_CAMERA_SC2336
+#include "sc2336.h"
+#define SCCB0_CAM_DEVICE_ADDR SC2336_SCCB_ADDR
+#else
+#define SCCB0_CAM_DEVICE_ADDR 0x01
+#endif
+
 #ifdef USE_ESP32
 
 static const char *const TAG = "tab5_camera";
