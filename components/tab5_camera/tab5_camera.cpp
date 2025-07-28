@@ -9,16 +9,13 @@
 
 static const char *const TAG = "tab5_camera";
 
-// Constantes de configuration pour Tab5 - version améliorée
+// Constantes de configuration pour Tab5
 #define TAB5_CAMERA_H_RES 640
 #define TAB5_CAMERA_V_RES 480
 #define TAB5_MIPI_CSI_LANE_BITRATE_MBPS 200
 #define TAB5_ISP_CLOCK_HZ 50000000  
 #define TAB5_STREAMING_STACK_SIZE 8192
 #define TAB5_FRAME_QUEUE_LENGTH 8
-#define TAB5_CSI_QUEUE_ITEMS 4        // Queue CSI plus grande
-#define TAB5_MAX_FPS 30               // FPS maximum pour éviter la surcharge
-#define TAB5_FRAME_TIMEOUT_MS 200     // Timeout pour la capture de frame
 
 namespace esphome {
 namespace tab5_camera {
@@ -93,14 +90,12 @@ void Tab5Camera::dump_config() {
 #ifdef HAS_ESP32_P4_CAMERA
   ESP_LOGCONFIG(TAG, "    HAS_ESP32_P4_CAMERA: YES");
   ESP_LOGCONFIG(TAG, "  Resolution: %dx%d", TAB5_CAMERA_H_RES, TAB5_CAMERA_V_RES);
-  ESP_LOGCONFIG(TAG, "  CSI Queue Items: %d", TAB5_CSI_QUEUE_ITEMS);
-  ESP_LOGCONFIG(TAG, "  Max FPS: %d", TAB5_MAX_FPS);
   if (this->external_clock_pin_ > 0) {
     ESP_LOGCONFIG(TAG, "  External Clock Pin: GPIO%u", this->external_clock_pin_);
     ESP_LOGCONFIG(TAG, "  External Clock Frequency: %u Hz", this->external_clock_frequency_);
   }
   ESP_LOGCONFIG(TAG, "  Frame Buffer Size: %zu bytes", this->frame_buffer_size_);
-  ESP_LOGCONFIG(TAG, "  Streaming Support: Available (Queue Mode)");
+  ESP_LOGCONFIG(TAG, "  Streaming Support: Available");
   ESP_LOGCONFIG(TAG, "  I2C Address: 0x%02X", this->address_);
   
   if (this->reset_pin_) {
@@ -236,7 +231,7 @@ bool Tab5Camera::init_camera_() {
 
   ESP_LOGI(TAG, "Frame buffer allocated successfully at %p", this->frame_buffer_);
 
-  // Étape 5: Configuration du contrôleur CSI (VERSION CORRIGÉE)
+  // Étape 5: Configuration du contrôleur CSI
   ESP_LOGI(TAG, "Step 2.5: Configuring CSI controller");
   esp_cam_ctlr_csi_config_t csi_config = {};
   csi_config.ctlr_id = 0;
@@ -247,19 +242,19 @@ bool Tab5Camera::init_camera_() {
   csi_config.output_data_color_type = CAM_CTLR_COLOR_RGB565;
   csi_config.data_lane_num = 2;
   csi_config.byte_swap_en = false;
-  csi_config.queue_items = TAB5_CSI_QUEUE_ITEMS; // Augmenté de 1 à 4 pour éviter la queue pleine
+  csi_config.queue_items = 1;
 
   esp_err_t ret = esp_cam_new_csi_ctlr(&csi_config, &this->cam_handle_);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "CSI controller init failed: %s", esp_err_to_name(ret));
     return false;
   }
-  ESP_LOGI(TAG, "CSI controller created successfully with queue size: %d", csi_config.queue_items);
+  ESP_LOGI(TAG, "CSI controller created successfully");
   
-  // Étape 6: Configuration des callbacks (VERSION CORRIGÉE)
+  // Étape 6: Configuration des callbacks - CORRECTION CRITIQUE
   ESP_LOGI(TAG, "Step 2.6: Registering camera callbacks");
   esp_cam_ctlr_evt_cbs_t cbs = {
-    .on_get_new_trans = nullptr,  // ⚠️ IMPORTANT: nullptr pour utiliser la queue
+    .on_get_new_trans = nullptr,  // ← IMPORTANT: laisser à nullptr pour utiliser la queue interne !
     .on_trans_finished = Tab5Camera::camera_get_finished_trans_callback,
   };
   
@@ -268,7 +263,7 @@ bool Tab5Camera::init_camera_() {
     ESP_LOGE(TAG, "Failed to register camera callbacks: %s", esp_err_to_name(ret));
     return false;
   }
-  ESP_LOGI(TAG, "Camera callbacks registered successfully (using queue mode)");
+  ESP_LOGI(TAG, "Camera callbacks registered successfully");
   
   // Étape 7: Activation du contrôleur de caméra
   ESP_LOGI(TAG, "Step 2.7: Enabling camera controller");
@@ -373,40 +368,41 @@ void Tab5Camera::deinit_camera_() {
   }
 }
 
-// ⚠️ CALLBACK SUPPRIMÉ - Plus utilisé avec le mode queue
+// SUPPRIMÉ - Cette fonction causait le problème de queue pleine !
+// Elle empêchait la queue interne du contrôleur CSI de fonctionner correctement
 /*
 bool Tab5Camera::camera_get_new_vb_callback(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data) {
-  Tab5Camera *camera = static_cast<Tab5Camera*>(user_data);
-  trans->buffer = camera->frame_buffer_;
-  trans->buflen = camera->frame_buffer_size_;
-  return false;
+  // Cette fonction est supprimée - elle causait le conflit avec la queue interne
 }
 */
 
+// CORRIGÉ - Callback de fin de transaction uniquement
 bool Tab5Camera::camera_get_finished_trans_callback(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data) {
   Tab5Camera *camera = static_cast<Tab5Camera*>(user_data);
-  if (!camera) {
-    ESP_LOGE(TAG, "camera_get_finished_trans_callback called with null user_data");
+  if (!camera || !trans->buffer) {
+    ESP_LOGE(TAG, "camera_get_finished_trans_callback called with invalid data");
     return false;
   }
 
-  // On crée une structure FrameData contenant les infos nécessaires
-  FrameData frame;
-  frame.buffer = trans->buffer;  // Buffer récupéré de la queue
-  frame.size = trans->received_size;  // Taille réelle reçue
-  frame.timestamp = esp_timer_get_time();  // Timestamp en microsecondes
+  // Synchronisation du cache pour la frame reçue
+  esp_cache_msync(trans->buffer, trans->received_size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
   
-  // On essaie de mettre la frame dans la queue (non bloquant)
+  // Création d'une structure FrameData avec les vraies données reçues
+  FrameData frame;
+  frame.buffer = trans->buffer;
+  frame.size = trans->received_size;  // Utiliser received_size, pas buflen
+  frame.timestamp = esp_timer_get_time();
+  
+  // Envoi non-bloquant vers la queue applicative
   BaseType_t ret = xQueueSendFromISR(camera->frame_queue_, &frame, NULL);
   if (ret == pdTRUE) {
-    // On signale qu'une frame est prête via le sémaphore (release)
+    // Signaler qu'une frame est disponible
     xSemaphoreGiveFromISR(camera->frame_ready_semaphore_, NULL);
   } else {
-    // Queue pleine, on perd la frame
-    ESP_LOGW(TAG, "Frame queue full, dropping frame");
+    // Queue pleine - on peut choisir d'overwrite ou de dropper
+    ESP_LOGD(TAG, "Application frame queue full, dropping frame");
   }
 
-  // Retourne false pour indiquer qu'on ne garde pas la possession exclusive de la buffer
   return false;
 }
 
@@ -432,10 +428,10 @@ bool Tab5Camera::take_snapshot() {
   ESP_LOGD(TAG, "Camera '%s' snapshot taken, size: %zu bytes", this->name_.c_str(), trans.received_size);
   
   // Synchronisation du cache
-  esp_cache_msync(trans.buffer, trans.received_size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+  esp_cache_msync(this->frame_buffer_, trans.received_size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
   
-  // Appel des callbacks
-  this->on_frame_callbacks_.call(static_cast<uint8_t*>(trans.buffer), trans.received_size);
+  // Appel des callbacks avec la taille réelle reçue
+  this->on_frame_callbacks_.call(static_cast<uint8_t*>(this->frame_buffer_), trans.received_size);
   
   return true;
 }
@@ -515,67 +511,41 @@ void Tab5Camera::streaming_task(void *parameter) {
   camera->streaming_loop_();
 }
 
+// NOUVELLE méthode de streaming utilisant correctement la queue interne du contrôleur
 void Tab5Camera::streaming_loop_() {
-  ESP_LOGD(TAG, "Streaming loop started for camera '%s' (queue mode)", this->name_.c_str());
-
-  // Variables pour le contrôle du taux de frames
-  TickType_t last_frame_time = xTaskGetTickCount();
-  const TickType_t min_frame_interval = pdMS_TO_TICKS(1000 / TAB5_MAX_FPS); // Contrôle FPS
-  
-  // Variable pour compter les erreurs consécutives
-  int consecutive_errors = 0;
-  const int max_consecutive_errors = 10;
+  ESP_LOGD(TAG, "Streaming loop started for camera '%s' (using internal queue)", this->name_.c_str());
 
   while (!this->streaming_should_stop_) {
-    // Vérifier le timing pour éviter d'aller trop vite
-    TickType_t current_time = xTaskGetTickCount();
-    TickType_t time_since_last_frame = current_time - last_frame_time;
-    
-    if (time_since_last_frame < min_frame_interval) {
-      // Attendre le temps nécessaire
-      vTaskDelay(min_frame_interval - time_since_last_frame);
-      current_time = xTaskGetTickCount();
-    }
-
-    // Préparer la transaction pour la queue
+    // Préparation de la transaction pour recevoir une frame
     esp_cam_ctlr_trans_t trans = {
       .buffer = this->frame_buffer_,
       .buflen = this->frame_buffer_size_,
     };
 
-    // Envoyer la transaction à la queue du contrôleur CSI
-    esp_err_t ret = esp_cam_ctlr_receive(this->cam_handle_, &trans, TAB5_FRAME_TIMEOUT_MS / portTICK_PERIOD_MS);
+    // Envoi de la transaction vers la queue interne du contrôleur CSI
+    // Ceci permet au contrôleur de gérer automatiquement les buffers
+    esp_err_t ret = esp_cam_ctlr_receive(this->cam_handle_, &trans, 100 / portTICK_PERIOD_MS);
 
     if (ret == ESP_OK) {
-      // Succès - la frame sera traitée par camera_get_finished_trans_callback
-      consecutive_errors = 0;
-      last_frame_time = current_time;
+      // La frame a été capturée avec succès
+      ESP_LOGV(TAG, "Frame captured successfully, size: %zu bytes", trans.received_size);
       
-      // Synchronisation du cache et appel des callbacks
+      // Synchronisation du cache
       esp_cache_msync(trans.buffer, trans.received_size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+      
+      // Appel des callbacks avec les données reçues
       this->on_frame_callbacks_.call(static_cast<uint8_t*>(trans.buffer), trans.received_size);
       
     } else if (ret == ESP_ERR_TIMEOUT) {
-      // Timeout normal - pas d'erreur critique
-      ESP_LOGV(TAG, "Transaction timeout (normal)");
-      consecutive_errors = 0;
-      
+      // Timeout normal - continuer
+      ESP_LOGV(TAG, "Frame capture timeout - normal in streaming mode");
     } else {
-      // Erreur - incrémenter le compteur
-      consecutive_errors++;
-      ESP_LOGW(TAG, "Transaction failed (%d/%d): %s", 
-               consecutive_errors, max_consecutive_errors, esp_err_to_name(ret));
-      
-      if (consecutive_errors >= max_consecutive_errors) {
-        ESP_LOGE(TAG, "Too many consecutive errors, stopping streaming");
-        break;
-      }
-      
-      // Attendre plus longtemps en cas d'erreur
-      vTaskDelay(100 / portTICK_PERIOD_MS);
+      // Erreur réelle
+      ESP_LOGW(TAG, "Frame capture failed: %s", esp_err_to_name(ret));
+      vTaskDelay(10 / portTICK_PERIOD_MS);  // Pause avant de réessayer
     }
 
-    // Petite pause pour ne pas monopoliser le CPU
+    // Petite pause pour éviter de surcharger le système
     vTaskDelay(1 / portTICK_PERIOD_MS);
   }
 
