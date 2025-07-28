@@ -169,22 +169,36 @@ bool Tab5Camera::init_sensor_() {
     return false;  // ← Maintenant on échoue si pas de capteur
   }
   
+  // Tentative d'identification du capteur
+  uint8_t id_reg_1, id_reg_2;
+  if (this->read_byte(0x00, &id_reg_1) && this->read_byte(0x01, &id_reg_2)) {
+    uint16_t sensor_id = (id_reg_1 << 8) | id_reg_2;
+    ESP_LOGI(TAG, "🔍 Sensor ID: 0x%04X (reg 0x00=0x%02X, reg 0x01=0x%02X)", 
+             sensor_id, id_reg_1, id_reg_2);
+    
+    // Identification basée sur l'ID
+    switch (sensor_id) {
+      case 0x00A2: ESP_LOGI(TAG, "📷 Detected: Possible OmniVision sensor (partial ID match)"); break;
+      case 0x2640: ESP_LOGI(TAG, "📷 Detected: OV2640 sensor"); break;
+      case 0x5640: ESP_LOGI(TAG, "📷 Detected: OV5640 sensor"); break;
+      default: ESP_LOGI(TAG, "📷 Unknown sensor - will use generic configuration"); break;
+    }
+  }
+  
   // Configuration minimale pour démarrer la capture
   ESP_LOGI(TAG, "🔧 Configuring sensor for basic operation...");
   
-  // Configuration basique générique (à adapter selon votre capteur exact)
-  // Ces registres sont communs à beaucoup de capteurs MIPI
+  // Configuration basique générique - éviter les registres problématiques
   const struct {
     uint8_t reg;
     uint8_t val;
     const char* desc;
   } basic_config[] = {
-    // Configuration basique 8-bit - À ADAPTER selon votre capteur !
-    {0x12, 0x80, "Software reset"},         // Reset commun
-    {0x09, 0x10, "System control"},         // Control général
-    {0x15, 0x00, "Output format"},          // Format de sortie
-    // Vous devez ajouter ici la configuration spécifique à votre capteur
-    // Ces valeurs sont des exemples génériques
+    // Configuration très basique, éviter 0x12 (reset) qui pose problème
+    {0x09, 0x00, "System control"},         // Mode normal
+    {0x15, 0x00, "Output format"},          // Format par défaut
+    {0x3A, 0x04, "TSLB register"},          // Output sequence
+    // Configuration minimale pour test
   };
   
   for (size_t i = 0; i < sizeof(basic_config) / sizeof(basic_config[0]); i++) {
@@ -192,7 +206,7 @@ bool Tab5Camera::init_sensor_() {
              basic_config[i].desc, basic_config[i].reg, basic_config[i].val);
     
     if (!this->write_byte(basic_config[i].reg, basic_config[i].val)) {
-      ESP_LOGW(TAG, "Failed to write register 0x%02X", basic_config[i].reg);
+      ESP_LOGW(TAG, "Failed to write register 0x%02X - continuing anyway", basic_config[i].reg);
     }
     
     vTaskDelay(10 / portTICK_PERIOD_MS);  // Délai entre les écritures
@@ -205,6 +219,10 @@ bool Tab5Camera::init_sensor_() {
   } else {
     ESP_LOGW(TAG, "⚠️ Sensor not responding after configuration");
   }
+  
+  // Pour l'instant, on considère que même sans configuration complète,
+  // le pipeline MIPI peut recevoir des données du capteur
+  ESP_LOGI(TAG, "ℹ️ Using minimal sensor configuration - full config needed for proper images");
   
   this->sensor_initialized_ = true;
   ESP_LOGI(TAG, "✅ Camera sensor initialized with basic configuration");
@@ -627,7 +645,6 @@ void Tab5Camera::streaming_loop_() {
 }  // namespace esphome
 
 #endif  // USE_ESP32
-
 
 
 
