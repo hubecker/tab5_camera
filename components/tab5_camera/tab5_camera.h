@@ -46,11 +46,11 @@ static constexpr uint16_t SC2356_CHIP_ID_VALUE = 0x2356;
 
 // Résolutions supportées par SC2356
 enum class SC2356Resolution {
-  QVGA,
-  VGA,
-  SVGA,
-  HD,
-  UXGA,  // Mode natif SC2356 2MP
+  QVGA_320X240,
+  VGA_640x480,
+  SVGA_800x600,
+  HD_1280x720,
+  UXGA_1600x1200,  // Mode natif SC2356 2MP
   FHD_1920x1080    // Mode crop/scale
 };
 
