@@ -3,7 +3,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/gpio.h"
 #include "esphome/core/preferences.h"
-#include "esphome/core/log.h"  // ← AJOUTÉ pour ESP_LOGW
+#include "esphome/core/log.h"
 #include "esphome/components/i2c/i2c.h"
 
 #ifdef USE_ESP32
@@ -16,7 +16,7 @@
 #include "esp_cam_ctlr_csi.h"
 #include "esp_cam_ctlr.h"
 #include "driver/isp.h"
-#include "driver/ledc.h"  // ← AJOUTÉ pour LEDC
+#include "driver/ledc.h"
 #include "esp_cache.h"
 #include "esp_heap_caps.h"
 #include "esp_ldo_regulator.h"
@@ -40,7 +40,8 @@ namespace tab5_camera {
 
 // Configuration spécifique SC2356
 static constexpr uint8_t SC2356_I2C_ADDRESS = 0x43;
-static constexpr uint16_t SC2356_CHIP_ID_REG = 0x3107;
+static constexpr uint16_t SC2356_CHIP_ID_H_REG = 0x3107;
+static constexpr uint16_t SC2356_CHIP_ID_L_REG = 0x3108;
 static constexpr uint16_t SC2356_CHIP_ID_VALUE = 0x2356;
 
 // Résolutions supportées par SC2356
@@ -49,7 +50,7 @@ enum class SC2356Resolution {
   VGA_640x480,
   SVGA_800x600,
   HD_1280x720,
-  UXGA_1600x1200,  // Mode natif SC2356
+  UXGA_1600x1200,  // Mode natif SC2356 2MP
   FHD_1920x1080    // Mode crop/scale
 };
 
@@ -85,7 +86,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   void set_external_clock_frequency(uint32_t freq) { this->external_clock_frequency_ = freq; }
   void set_reset_pin(GPIOPin *pin) { this->reset_pin_ = pin; }
 
-  // Configuration SC2356 spécifique
+  // Configuration SC2356 via enums
   void set_resolution(SC2356Resolution resolution) { this->resolution_ = resolution; }
   void set_pixel_format(SC2356PixelFormat format) { this->pixel_format_ = format; }
   void set_jpeg_quality(uint8_t quality) { 
@@ -93,6 +94,61 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   }
   void set_framerate(uint8_t framerate) { 
     this->framerate_ = std::max(static_cast<uint8_t>(5), std::min(framerate, static_cast<uint8_t>(30))); 
+  }
+
+  // Méthodes de compatibilité pour la configuration YAML string
+  void set_resolution(const std::string &resolution) {
+    if (resolution == "QVGA") {
+      this->resolution_ = SC2356Resolution::QVGA_320x240;
+    } else if (resolution == "VGA") {
+      this->resolution_ = SC2356Resolution::VGA_640x480;
+    } else if (resolution == "SVGA") {
+      this->resolution_ = SC2356Resolution::SVGA_800x600;
+    } else if (resolution == "HD" || resolution == "720P") {
+      this->resolution_ = SC2356Resolution::HD_1280x720;
+    } else if (resolution == "UXGA") {
+      this->resolution_ = SC2356Resolution::UXGA_1600x1200;
+    } else if (resolution == "FHD" || resolution == "1080P") {
+      this->resolution_ = SC2356Resolution::FHD_1920x1080;
+    } else {
+      ESP_LOGW("tab5_camera", "Unknown resolution '%s', using VGA", resolution.c_str());
+      this->resolution_ = SC2356Resolution::VGA_640x480;
+    }
+  }
+
+  void set_pixel_format(const std::string &format) {
+    if (format == "RGB565") {
+      this->pixel_format_ = SC2356PixelFormat::RGB565;
+    } else if (format == "YUV422") {
+      this->pixel_format_ = SC2356PixelFormat::YUV422;
+    } else if (format == "RAW10") {
+      this->pixel_format_ = SC2356PixelFormat::RAW10;
+    } else if (format == "JPEG") {
+      this->pixel_format_ = SC2356PixelFormat::JPEG;
+    } else {
+      ESP_LOGW("tab5_camera", "Unknown format '%s', using RGB565", format.c_str());
+      this->pixel_format_ = SC2356PixelFormat::RGB565;
+    }
+  }
+
+  // Compatibilité avec l'ancienne interface (width, height)
+  void set_resolution(uint16_t width, uint16_t height) {
+    if (width == 320 && height == 240) {
+      this->resolution_ = SC2356Resolution::QVGA_320x240;
+    } else if (width == 640 && height == 480) {
+      this->resolution_ = SC2356Resolution::VGA_640x480;
+    } else if (width == 800 && height == 600) {
+      this->resolution_ = SC2356Resolution::SVGA_800x600;
+    } else if (width == 1280 && height == 720) {
+      this->resolution_ = SC2356Resolution::HD_1280x720;
+    } else if (width == 1600 && height == 1200) {
+      this->resolution_ = SC2356Resolution::UXGA_1600x1200;
+    } else if (width == 1920 && height == 1080) {
+      this->resolution_ = SC2356Resolution::FHD_1920x1080;
+    } else {
+      ESP_LOGW("tab5_camera", "Unsupported resolution %dx%d, using VGA", width, height);
+      this->resolution_ = SC2356Resolution::VGA_640x480;
+    }
   }
 
   // Paramètres avancés SC2356
@@ -154,6 +210,10 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
     bool valid;
   };
 
+  // Fonctions utilitaires pour dimensions
+  std::pair<uint16_t, uint16_t> get_resolution_dimensions_(SC2356Resolution resolution) const;
+  size_t calculate_frame_size_() const;
+
   // Initialisation
   bool init_camera_();
   bool init_sc2356_sensor_();
@@ -174,7 +234,6 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   bool write_sc2356_register_16_(uint16_t reg, uint16_t value);
   
   // Callbacks statiques
-  static bool IRAM_ATTR camera_get_new_vb_callback(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data);
   static bool IRAM_ATTR camera_get_finished_trans_callback(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data);
   
   // Tâche de streaming
@@ -201,10 +260,10 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   bool streaming_should_stop_{false};
   
   // Constantes
-  static constexpr size_t FRAME_QUEUE_SIZE = 3;
+  static constexpr size_t FRAME_QUEUE_SIZE = 4;
   static constexpr size_t FRAME_BUFFER_COUNT = 1;
-  static constexpr uint32_t STREAMING_TASK_STACK_SIZE = 8192;  // Augmenté pour SC2356
-  static constexpr UBaseType_t STREAMING_TASK_PRIORITY = 5;
+  static constexpr uint32_t STREAMING_TASK_STACK_SIZE = 8192;
+  static constexpr UBaseType_t STREAMING_TASK_PRIORITY = 6;
 #endif
 
  private:
@@ -233,11 +292,9 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   // Callbacks
   CallbackManager<void(uint8_t*, size_t)> on_frame_callbacks_;
   
-  // Utilitaires
+  // Utilitaires privés
   void set_error_(const std::string &error);
   void clear_error_();
-  std::pair<uint16_t, uint16_t> get_resolution_dimensions_(SC2356Resolution resolution) const;
-  size_t calculate_frame_size_() const;
 };
 
 }  // namespace tab5_camera
