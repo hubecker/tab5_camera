@@ -165,7 +165,7 @@ bool Tab5Camera::init_sensor_() {
   }
   
   if (!sensor_detected) {
-    ESP_LOGE(TAG, "❌ No sensor detected at I2C address 0x%02X - check wiring!", this->address_);
+    ESP_LOGE(TAG, " No sensor detected at I2C address 0x%02X - check wiring!", this->address_);
     return false;  // ← Maintenant on échoue si pas de capteur
   }
   
@@ -178,10 +178,10 @@ bool Tab5Camera::init_sensor_() {
     
     // Identification basée sur l'ID
     switch (sensor_id) {
-      case 0x00A2: ESP_LOGI(TAG, "📷 Detected: Possible OmniVision sensor (partial ID match)"); break;
-      case 0x2640: ESP_LOGI(TAG, "📷 Detected: OV2640 sensor"); break;
-      case 0x5640: ESP_LOGI(TAG, "📷 Detected: OV5640 sensor"); break;
-      default: ESP_LOGI(TAG, "📷 Unknown sensor - will use generic configuration"); break;
+      case 0x00A2: ESP_LOGI(TAG, " Detected: Possible OmniVision sensor (partial ID match)"); break;
+      case 0x2640: ESP_LOGI(TAG, " Detected: OV2640 sensor"); break;
+      case 0x5640: ESP_LOGI(TAG, " Detected: OV5640 sensor"); break;
+      default: ESP_LOGI(TAG, " Unknown sensor - will use generic configuration"); break;
     }
   }
   
@@ -215,17 +215,17 @@ bool Tab5Camera::init_sensor_() {
   // Vérification basique - test si le capteur répond toujours
   uint8_t verify_reg;
   if (this->read_byte(0x00, &verify_reg)) {
-    ESP_LOGI(TAG, "✅ Sensor still responsive after configuration (reg 0x00 = 0x%02X)", verify_reg);
+    ESP_LOGI(TAG, " Sensor still responsive after configuration (reg 0x00 = 0x%02X)", verify_reg);
   } else {
-    ESP_LOGW(TAG, "⚠️ Sensor not responding after configuration");
+    ESP_LOGW(TAG, " Sensor not responding after configuration");
   }
   
   // Pour l'instant, on considère que même sans configuration complète,
   // le pipeline MIPI peut recevoir des données du capteur
-  ESP_LOGI(TAG, "ℹ️ Using minimal sensor configuration - full config needed for proper images");
+  ESP_LOGI(TAG, " Using minimal sensor configuration - full config needed for proper images");
   
   this->sensor_initialized_ = true;
-  ESP_LOGI(TAG, "✅ Camera sensor initialized with basic configuration");
+  ESP_LOGI(TAG, " Camera sensor initialized with basic configuration");
   
   return true;
 }
@@ -455,12 +455,12 @@ bool Tab5Camera::camera_get_finished_trans_callback(esp_cam_ctlr_handle_t handle
 
   // Vérification de la taille des données
   if (trans->received_size == 0) {
-    ESP_LOGW(TAG, "⚠️ Frame #%lu is empty - sensor might not be generating data", frame_count);
+    ESP_LOGW(TAG, " Frame #%lu is empty - sensor might not be generating data", frame_count);
     return false;
   }
   
   if (trans->received_size < 1000) {  // Taille suspicieusement petite
-    ESP_LOGW(TAG, "⚠️ Frame #%lu size is very small (%zu bytes)", frame_count, trans->received_size);
+    ESP_LOGW(TAG, " Frame #%lu size is very small (%zu bytes)", frame_count, trans->received_size);
   }
 
   // Synchronisation du cache pour la frame reçue
