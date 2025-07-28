@@ -242,7 +242,7 @@ bool Tab5Camera::init_camera_() {
   csi_config.output_data_color_type = CAM_CTLR_COLOR_RGB565;
   csi_config.data_lane_num = 2;
   csi_config.byte_swap_en = false;
-  csi_config.queue_items = 1;
+  csi_config.queue_items = 4;  // ← AUGMENTÉ: plus de buffers dans la queue
 
   esp_err_t ret = esp_cam_new_csi_ctlr(&csi_config, &this->cam_handle_);
   if (ret != ESP_OK) {
@@ -452,6 +452,19 @@ bool Tab5Camera::start_streaming() {
   this->streaming_should_stop_ = false;
   this->streaming_active_ = true;
   
+  // Pré-envoyer une transaction initiale pour démarrer le processus
+  ESP_LOGI(TAG, "Sending initial transaction to start streaming");
+  esp_cam_ctlr_trans_t initial_trans = {
+    .buffer = this->frame_buffer_,
+    .buflen = this->frame_buffer_size_,
+  };
+  
+  esp_err_t ret = esp_cam_ctlr_receive(this->cam_handle_, &initial_trans, 1000 / portTICK_PERIOD_MS);
+  if (ret != ESP_OK) {
+    ESP_LOGW(TAG, "Failed to send initial transaction: %s", esp_err_to_name(ret));
+    // Continue anyway, les callbacks peuvent compenser
+  }
+  
   // Création de la tâche de streaming
   BaseType_t result = xTaskCreate(
     Tab5Camera::streaming_task,
@@ -511,40 +524,27 @@ void Tab5Camera::streaming_task(void *parameter) {
   camera->streaming_loop_();
 }
 
-// NOUVELLE méthode de streaming utilisant correctement la queue interne du contrôleur
+// NOUVELLE méthode de streaming - approche différente pour éviter le conflit de queue
 void Tab5Camera::streaming_loop_() {
-  ESP_LOGD(TAG, "Streaming loop started for camera '%s' (using internal queue)", this->name_.c_str());
+  ESP_LOGD(TAG, "Streaming loop started for camera '%s' (callback-based)", this->name_.c_str());
 
+  // Au lieu d'appeler esp_cam_ctlr_receive() en boucle (qui sature la queue),
+  // on utilise uniquement les callbacks pour récupérer les frames
+  
   while (!this->streaming_should_stop_) {
-    // Préparation de la transaction pour recevoir une frame
-    esp_cam_ctlr_trans_t trans = {
-      .buffer = this->frame_buffer_,
-      .buflen = this->frame_buffer_size_,
-    };
-
-    // Envoi de la transaction vers la queue interne du contrôleur CSI
-    // Ceci permet au contrôleur de gérer automatiquement les buffers
-    esp_err_t ret = esp_cam_ctlr_receive(this->cam_handle_, &trans, 100 / portTICK_PERIOD_MS);
-
-    if (ret == ESP_OK) {
-      // La frame a été capturée avec succès
-      ESP_LOGV(TAG, "Frame captured successfully, size: %zu bytes", trans.received_size);
+    // Attendre qu'une frame soit disponible via le callback
+    if (xSemaphoreTake(this->frame_ready_semaphore_, 100 / portTICK_PERIOD_MS) == pdTRUE) {
       
-      // Synchronisation du cache
-      esp_cache_msync(trans.buffer, trans.received_size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
-      
-      // Appel des callbacks avec les données reçues
-      this->on_frame_callbacks_.call(static_cast<uint8_t*>(trans.buffer), trans.received_size);
-      
-    } else if (ret == ESP_ERR_TIMEOUT) {
-      // Timeout normal - continuer
-      ESP_LOGV(TAG, "Frame capture timeout - normal in streaming mode");
-    } else {
-      // Erreur réelle
-      ESP_LOGW(TAG, "Frame capture failed: %s", esp_err_to_name(ret));
-      vTaskDelay(10 / portTICK_PERIOD_MS);  // Pause avant de réessayer
+      // Récupérer les données de frame depuis notre queue applicative
+      FrameData frame;
+      if (xQueueReceive(this->frame_queue_, &frame, 0) == pdTRUE) {
+        ESP_LOGV(TAG, "Frame received from callback, size: %zu bytes", frame.size);
+        
+        // Appel des callbacks avec les données reçues
+        this->on_frame_callbacks_.call(static_cast<uint8_t*>(frame.buffer), frame.size);
+      }
     }
-
+    
     // Petite pause pour éviter de surcharger le système
     vTaskDelay(1 / portTICK_PERIOD_MS);
   }
@@ -560,7 +560,6 @@ void Tab5Camera::streaming_loop_() {
 }  // namespace esphome
 
 #endif  // USE_ESP32
-
 
 
 
