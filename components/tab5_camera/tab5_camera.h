@@ -52,7 +52,7 @@ enum SC2356Resolution {
   HD_1280X720,
   UXGA_1600X1200,
   FHD_1920X1080
-};
+ };
 
 // Formats de pixels supportés
 enum class SC2356PixelFormat {
