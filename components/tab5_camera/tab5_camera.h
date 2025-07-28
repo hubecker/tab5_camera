@@ -3,6 +3,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/gpio.h"
 #include "esphome/core/preferences.h"
+#include "esphome/core/log.h"  // ← AJOUTÉ pour ESP_LOGW
 #include "esphome/components/i2c/i2c.h"
 
 #ifdef USE_ESP32
@@ -15,6 +16,7 @@
 #include "esp_cam_ctlr_csi.h"
 #include "esp_cam_ctlr.h"
 #include "driver/isp.h"
+#include "driver/ledc.h"  // ← AJOUTÉ pour LEDC
 #include "esp_cache.h"
 #include "esp_heap_caps.h"
 #include "esp_ldo_regulator.h"
