@@ -240,156 +240,175 @@ bool Tab5Camera::init_sensor_() {
   return true;
 }
 
-bool Tab5Camera::init_camera_() {
-  if (this->camera_initialized_) {
-    ESP_LOGI(TAG, "Camera already initialized, skipping");
+bool Tab5Camera::init_sensor_() {
+  if (this->sensor_initialized_) {
+    ESP_LOGI(TAG, "Sensor already initialized, skipping");
     return true;
   }
-
-  ESP_LOGI(TAG, "Starting camera initialization for '%s'", this->name_.c_str());
-
-  // Étape 1: Initialisation du LDO MIPI
-  ESP_LOGI(TAG, "Step 2.1: Initializing MIPI LDO");
-  if (!this->init_ldo_()) {
-    ESP_LOGE(TAG, "Failed to initialize MIPI LDO");
+  
+  ESP_LOGI(TAG, "Attempting to initialize OV5645 camera sensor at I2C address 0x%02X", this->address_);
+  
+  // Test de communication I2C de base
+  uint8_t test_data;
+  if (!this->read_byte(0x00, &test_data)) {
+    ESP_LOGE(TAG, "No response from sensor at address 0x%02X - check wiring!", this->address_);
     return false;
   }
-  ESP_LOGI(TAG, "MIPI LDO initialized successfully");
-
-  // Étape 2: Reset de la caméra si pin disponible
-  if (this->reset_pin_) {
-    ESP_LOGI(TAG, "Step 2.2: Executing camera reset sequence");
-    this->reset_pin_->setup();
-    this->reset_pin_->digital_write(false);
-    delayMicroseconds(10000);  // 10ms
-    this->reset_pin_->digital_write(true);
-    delayMicroseconds(10000);  // 10ms
-    ESP_LOGI(TAG, "Camera reset completed");
-  } else {
-    ESP_LOGI(TAG, "Step 2.2: No reset pin configured, skipping reset");
-  }
-
-  // Étape 3: Initialisation du capteur I2C
-  ESP_LOGI(TAG, "Step 2.3: Initializing camera sensor");
-  if (!this->init_sensor_()) {
-    ESP_LOGE(TAG, "Failed to initialize camera sensor");
-    return false;
-  }
-  ESP_LOGI(TAG, "Camera sensor initialized successfully");
-
-  // Étape 4: Allocation du frame buffer
-  ESP_LOGI(TAG, "Step 2.4: Allocating frame buffer");
-
-  // Calcul de la taille réelle requise
-  this->frame_buffer_size_ = TAB5_CAMERA_H_RES * TAB5_CAMERA_V_RES * 2; // RGB565 = 2 bytes par pixel
-
-  // Arrondi sur un multiple de 64 (cache line size)
-  this->frame_buffer_size_ = (this->frame_buffer_size_ + 63) & ~63;
-
-  ESP_LOGI(TAG, "Aligned frame buffer size: %zu bytes", this->frame_buffer_size_);
-
-  // Allocation alignée en PSRAM
-  this->frame_buffer_ = heap_caps_aligned_alloc(64, this->frame_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  if (!this->frame_buffer_) {
-    ESP_LOGE(TAG, "Failed to allocate aligned frame buffer in PSRAM (%zu bytes) - trying regular RAM", this->frame_buffer_size_);
-
-    // Essai avec RAM normale
-    this->frame_buffer_ = heap_caps_aligned_alloc(64, this->frame_buffer_size_, MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
-    if (!this->frame_buffer_) {
-      ESP_LOGE(TAG, "Failed to allocate aligned frame buffer in regular RAM also");
-      return false;
+  
+  // Identification du capteur OV5645
+  uint8_t id_high, id_low;
+  if (this->read_byte(0x300A, &id_high) && this->read_byte(0x300B, &id_low)) {
+    uint16_t sensor_id = (id_high << 8) | id_low;
+    ESP_LOGI(TAG, "Sensor ID: 0x%04X (should be 0x5645 for OV5645)", sensor_id);
+    
+    if (sensor_id != 0x5645) {
+      ESP_LOGW(TAG, "Unexpected sensor ID - OV5645 expected (0x5645)");
     }
+  } else {
+    ESP_LOGW(TAG, "Could not read sensor ID registers");
   }
 
-  ESP_LOGI(TAG, "Frame buffer allocated successfully at %p", this->frame_buffer_);
-
-  // Étape 5: Configuration du contrôleur CSI
-  ESP_LOGI(TAG, "Step 2.5: Configuring CSI controller");
-  esp_cam_ctlr_csi_config_t csi_config = {};
-  csi_config.ctlr_id = 0;
-  csi_config.h_res = TAB5_CAMERA_H_RES;
-  csi_config.v_res = TAB5_CAMERA_V_RES;
-  csi_config.lane_bit_rate_mbps = TAB5_MIPI_CSI_LANE_BITRATE_MBPS;
-  csi_config.input_data_color_type = CAM_CTLR_COLOR_RAW8;
-  csi_config.output_data_color_type = CAM_CTLR_COLOR_RGB565;
-  csi_config.data_lane_num = 2;
-  csi_config.byte_swap_en = false;
-  csi_config.queue_items = 4;  // ← AUGMENTÉ: plus de buffers dans la queue
-
-  esp_err_t ret = esp_cam_new_csi_ctlr(&csi_config, &this->cam_handle_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "CSI controller init failed: %s", esp_err_to_name(ret));
-    return false;
-  }
-  ESP_LOGI(TAG, "CSI controller created successfully");
+  // Configuration spécifique pour OV5645
+  ESP_LOGI(TAG, "Configuring OV5645 sensor...");
   
-  // Étape 6: Configuration des callbacks - CORRECTION CRITIQUE
-  ESP_LOGI(TAG, "Step 2.6: Registering camera callbacks");
-  esp_cam_ctlr_evt_cbs_t cbs = {
-    .on_get_new_trans = nullptr,  // ← IMPORTANT: laisser à nullptr pour utiliser la queue interne !
-    .on_trans_finished = Tab5Camera::camera_get_finished_trans_callback,
+  const uint8_t ov5645_init_regs[][2] = {
+    {0x3103, 0x11}, {0x3008, 0x82}, // Reset
+    {0x3008, 0x42}, {0x3103, 0x03},
+    {0x3017, 0xff}, {0x3018, 0xff},
+    {0x3034, 0x1a}, {0x3035, 0x21},
+    {0x3036, 0x46}, {0x3037, 0x13},
+    {0x3108, 0x01}, {0x3630, 0x36},
+    {0x3631, 0x0e}, {0x3632, 0xe2},
+    {0x3633, 0x12}, {0x3621, 0xe0},
+    {0x3704, 0xa0}, {0x3703, 0x5a},
+    {0x3715, 0x78}, {0x3717, 0x01},
+    {0x370b, 0x60}, {0x3705, 0x1a},
+    {0x3905, 0x02}, {0x3906, 0x10},
+    {0x3901, 0x0a}, {0x3731, 0x12},
+    {0x3600, 0x08}, {0x3601, 0x33},
+    {0x302d, 0x60}, {0x3620, 0x52},
+    {0x371b, 0x20}, {0x471c, 0x50},
+    {0x3a13, 0x43}, {0x3a18, 0x00},
+    {0x3a19, 0xf8}, {0x3635, 0x13},
+    {0x3636, 0x03}, {0x3634, 0x40},
+    {0x3622, 0x01}, {0x3c01, 0x34},
+    {0x3c04, 0x28}, {0x3c05, 0x98},
+    {0x3c06, 0x00}, {0x3c07, 0x08},
+    {0x3c08, 0x00}, {0x3c09, 0x1c},
+    {0x3c0a, 0x9c}, {0x3c0b, 0x40},
+    {0x3810, 0x00}, {0x3811, 0x10},
+    {0x3812, 0x00}, {0x3708, 0x64},
+    {0x4001, 0x02}, {0x4005, 0x1a},
+    {0x3000, 0x00}, {0x3004, 0xff},
+    {0x300e, 0x58}, {0x302e, 0x00},
+    {0x4300, 0x61}, {0x501f, 0x00},
+    {0x440e, 0x00}, {0x5000, 0xa7},
+    {0x5001, 0xa3}, {0x5180, 0xff},
+    {0x5181, 0xf2}, {0x5182, 0x00},
+    {0x5183, 0x14}, {0x5184, 0x25},
+    {0x5185, 0x24}, {0x5186, 0x09},
+    {0x5187, 0x09}, {0x5188, 0x09},
+    {0x5189, 0x88}, {0x518a, 0x54},
+    {0x518b, 0xee}, {0x518c, 0xb2},
+    {0x518d, 0x50}, {0x518e, 0x34},
+    {0x518f, 0x6b}, {0x5190, 0x46},
+    {0x5191, 0xf8}, {0x5192, 0x04},
+    {0x5193, 0x70}, {0x5194, 0xf0},
+    {0x5195, 0xf0}, {0x5196, 0x03},
+    {0x5197, 0x01}, {0x5198, 0x04},
+    {0x5199, 0x6c}, {0x519a, 0x04},
+    {0x519b, 0x00}, {0x519c, 0x09},
+    {0x519d, 0x2b}, {0x519e, 0x38},
+    {0x5381, 0x1e}, {0x5382, 0x5b},
+    {0x5383, 0x08}, {0x5384, 0x0a},
+    {0x5385, 0x7e}, {0x5386, 0x88},
+    {0x5387, 0x7c}, {0x5388, 0x6c},
+    {0x5389, 0x10}, {0x538a, 0x01},
+    {0x538b, 0x98}, {0x5300, 0x08},
+    {0x5301, 0x30}, {0x5302, 0x10},
+    {0x5303, 0x00}, {0x5304, 0x08},
+    {0x5305, 0x30}, {0x5306, 0x08},
+    {0x5307, 0x16}, {0x5309, 0x08},
+    {0x530a, 0x30}, {0x530b, 0x04},
+    {0x530c, 0x06}, {0x5480, 0x01},
+    {0x5481, 0x08}, {0x5482, 0x14},
+    {0x5483, 0x28}, {0x5484, 0x51},
+    {0x5485, 0x65}, {0x5486, 0x71},
+    {0x5487, 0x7d}, {0x5488, 0x87},
+    {0x5489, 0x91}, {0x548a, 0x9a},
+    {0x548b, 0xaa}, {0x548c, 0xb8},
+    {0x548d, 0xcd}, {0x548e, 0xdd},
+    {0x548f, 0xea}, {0x5490, 0x1d},
+    {0x5580, 0x02}, {0x5583, 0x40},
+    {0x5584, 0x10}, {0x5589, 0x10},
+    {0x558a, 0x00}, {0x558b, 0xf8},
+    {0x5800, 0x23}, {0x5801, 0x14},
+    {0x5802, 0x0f}, {0x5803, 0x0f},
+    {0x5804, 0x12}, {0x5805, 0x26},
+    {0x5806, 0x0c}, {0x5807, 0x08},
+    {0x5808, 0x05}, {0x5809, 0x05},
+    {0x580a, 0x08}, {0x580b, 0x0d},
+    {0x580c, 0x08}, {0x580d, 0x03},
+    {0x580e, 0x00}, {0x580f, 0x00},
+    {0x5810, 0x03}, {0x5811, 0x09},
+    {0x5812, 0x07}, {0x5813, 0x03},
+    {0x5814, 0x00}, {0x5815, 0x01},
+    {0x5816, 0x03}, {0x5817, 0x08},
+    {0x5818, 0x0d}, {0x5819, 0x08},
+    {0x581a, 0x05}, {0x581b, 0x06},
+    {0x581c, 0x08}, {0x581d, 0x0e},
+    {0x581e, 0x29}, {0x581f, 0x17},
+    {0x5820, 0x11}, {0x5821, 0x11},
+    {0x5822, 0x15}, {0x5823, 0x28},
+    {0x5824, 0x46}, {0x5825, 0x26},
+    {0x5826, 0x08}, {0x5827, 0x26},
+    {0x5828, 0x64}, {0x5829, 0x26},
+    {0x582a, 0x24}, {0x582b, 0x22},
+    {0x582c, 0x24}, {0x582d, 0x24},
+    {0x582e, 0x06}, {0x582f, 0x22},
+    {0x5830, 0x40}, {0x5831, 0x42},
+    {0x5832, 0x24}, {0x5833, 0x26},
+    {0x5834, 0x24}, {0x5835, 0x22},
+    {0x5836, 0x22}, {0x5837, 0x26},
+    {0x5838, 0x44}, {0x5839, 0x24},
+    {0x583a, 0x26}, {0x583b, 0x28},
+    {0x583c, 0x42}, {0x583d, 0xce},
+    {0x5025, 0x00}, {0x3a0f, 0x30},
+    {0x3a10, 0x28}, {0x3a1b, 0x30},
+    {0x3a1e, 0x26}, {0x3a11, 0x60},
+    {0x3a1f, 0x14}, {0x3008, 0x02}
   };
-  
-  ret = esp_cam_ctlr_register_event_callbacks(this->cam_handle_, &cbs, this);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to register camera callbacks: %s", esp_err_to_name(ret));
-    return false;
+
+  for (size_t i = 0; i < sizeof(ov5645_init_regs) / sizeof(ov5645_init_regs[0]); i++) {
+    ESP_LOGD(TAG, "Writing OV5645 register 0x%04X = 0x%02X", 
+             ov5645_init_regs[i][0], ov5645_init_regs[i][1]);
+    
+    if (!this->write_byte(ov5645_init_regs[i][0], ov5645_init_regs[i][1])) {
+      ESP_LOGW(TAG, "Failed to write OV5645 register 0x%04X", ov5645_init_regs[i][0]);
+    }
+    
+    vTaskDelay(2 / portTICK_PERIOD_MS);  // Délai entre les écritures
   }
-  ESP_LOGI(TAG, "Camera callbacks registered successfully");
-  
-  // Étape 7: Activation du contrôleur de caméra
-  ESP_LOGI(TAG, "Step 2.7: Enabling camera controller");
-  ret = esp_cam_ctlr_enable(this->cam_handle_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to enable camera controller: %s", esp_err_to_name(ret));
-    return false;
+
+  // Vérification finale
+  uint8_t status_reg;
+  if (this->read_byte(0x3029, &status_reg)) {
+    ESP_LOGI(TAG, "OV5645 sensor ready (status: 0x%02X)", status_reg);
+    if (status_reg & 0x08) {
+      ESP_LOGI(TAG, "OV5645 sensor is streaming");
+    } else {
+      ESP_LOGW(TAG, "OV5645 sensor not streaming - check configuration");
+    }
+  } else {
+    ESP_LOGW(TAG, "Failed to verify OV5645 sensor status");
   }
-  ESP_LOGI(TAG, "Camera controller enabled successfully");
+
+  this->sensor_initialized_ = true;
+  ESP_LOGI(TAG, "OV5645 camera sensor initialized successfully");
   
-  // Étape 8: Configuration de l'ISP
-  ESP_LOGI(TAG, "Step 2.8: Configuring ISP processor");
-  esp_isp_processor_cfg_t isp_config = {};
-  isp_config.clk_hz = TAB5_ISP_CLOCK_HZ;
-  isp_config.input_data_source = ISP_INPUT_DATA_SOURCE_CSI;
-  isp_config.input_data_color_type = ISP_COLOR_RAW8;
-  isp_config.output_data_color_type = ISP_COLOR_RGB565;
-  isp_config.has_line_start_packet = false;
-  isp_config.has_line_end_packet = false;
-  isp_config.h_res = TAB5_CAMERA_H_RES;
-  isp_config.v_res = TAB5_CAMERA_V_RES;
-  
-  ret = esp_isp_new_processor(&isp_config, &this->isp_proc_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "ISP processor init failed: %s", esp_err_to_name(ret));
-    return false;
-  }
-  ESP_LOGI(TAG, "ISP processor created successfully");
-  
-  ret = esp_isp_enable(this->isp_proc_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to enable ISP processor: %s", esp_err_to_name(ret));
-    return false;
-  }
-  ESP_LOGI(TAG, "ISP processor enabled successfully");
-  
-  // Étape 9: Initialisation du frame buffer
-  ESP_LOGI(TAG, "Step 2.9: Initializing frame buffer");
-  memset(this->frame_buffer_, 0xFF, this->frame_buffer_size_);
-  esp_cache_msync(this->frame_buffer_, this->frame_buffer_size_, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
-  ESP_LOGI(TAG, "Frame buffer initialized");
-  
-  // Étape 10: Démarrage de la caméra
-  ESP_LOGI(TAG, "Step 2.10: Starting camera controller");
-  ret = esp_cam_ctlr_start(this->cam_handle_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to start camera controller: %s", esp_err_to_name(ret));
-    return false;
-  }
-  
-  this->camera_initialized_ = true;
-  ESP_LOGI(TAG, "Camera '%s' initialized successfully - all steps completed", this->name_.c_str());
   return true;
 }
+
 
 void Tab5Camera::deinit_camera_() {
   if (this->streaming_active_) {
