@@ -173,7 +173,7 @@ bool Tab5Camera::init_sensor_() {
   uint8_t id_reg_1, id_reg_2;
   if (this->read_byte(0x00, &id_reg_1) && this->read_byte(0x01, &id_reg_2)) {
     uint16_t sensor_id = (id_reg_1 << 8) | id_reg_2;
-    ESP_LOGI(TAG, "🔍 Sensor ID: 0x%04X (reg 0x00=0x%02X, reg 0x01=0x%02X)", 
+    ESP_LOGI(TAG, " Sensor ID: 0x%04X (reg 0x00=0x%02X, reg 0x01=0x%02X)", 
              sensor_id, id_reg_1, id_reg_2);
     
     // Identification basée sur l'ID
@@ -186,7 +186,7 @@ bool Tab5Camera::init_sensor_() {
   }
   
   // Configuration minimale pour démarrer la capture
-  ESP_LOGI(TAG, "🔧 Configuring sensor for basic operation...");
+  ESP_LOGI(TAG, " Configuring sensor for basic operation...");
   
   // Configuration basique générique - éviter les registres problématiques
   const struct {
@@ -450,7 +450,7 @@ bool Tab5Camera::camera_get_finished_trans_callback(esp_cam_ctlr_handle_t handle
   static uint32_t frame_count = 0;
   frame_count++;
   
-  ESP_LOGI(TAG, "📸 Frame #%lu received: %zu bytes (expected: %zu)", 
+  ESP_LOGI(TAG, " Frame #%lu received: %zu bytes (expected: %zu)", 
            frame_count, trans->received_size, camera->frame_buffer_size_);
 
   // Vérification de la taille des données
