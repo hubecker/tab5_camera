@@ -5,6 +5,19 @@
 #include "esp_timer.h"
 #include "esp_cam_ctlr_csi.h"
 
+// Ajout des includes pour les capteurs ESP-IDF
+#include "esp_sccb_intf.h"
+#include "esp_sccb_i2c.h"
+#include "esp_cam_sensor.h"
+
+#ifdef CONFIG_CAMERA_OV5645
+#include "ov5645.h"
+#endif
+
+#ifdef CONFIG_CAMERA_SC2336
+#include "sc2336.h"
+#endif
+
 #ifdef USE_ESP32
 
 static const char *const TAG = "tab5_camera";
@@ -101,6 +114,11 @@ void Tab5Camera::dump_config() {
   if (this->reset_pin_) {
     LOG_PIN("  Reset Pin: ", this->reset_pin_);
   }
+  
+  // Afficher le type de capteur détecté
+  if (this->sensor_type_ != SENSOR_UNKNOWN) {
+    ESP_LOGCONFIG(TAG, "  Detected Sensor: %s", this->get_sensor_name());
+  }
 #else
   ESP_LOGCONFIG(TAG, "    HAS_ESP32_P4_CAMERA: NO");
   ESP_LOGCONFIG(TAG, "  Status: ESP32-P4 MIPI-CSI API not available");
@@ -116,6 +134,169 @@ float Tab5Camera::get_setup_priority() const {
 }
 
 #ifdef HAS_ESP32_P4_CAMERA
+
+const char* Tab5Camera::get_sensor_name() const {
+  switch (this->sensor_type_) {
+    case SENSOR_OV5645: return "OV5645";
+    case SENSOR_SC2336: return "SC2336";
+    case SENSOR_GENERIC: return "Generic/Unknown";
+    default: return "Unknown";
+  }
+}
+
+bool Tab5Camera::detect_and_init_sensor_() {
+  ESP_LOGI(TAG, "🔍 Starting sensor detection and initialization...");
+  
+  // Étape 1: Configuration du bus I2C/SCCB
+  i2c_master_bus_config_t i2c_bus_config = {
+    .clk_source = I2C_CLK_SRC_DEFAULT,
+    .i2c_port = I2C_NUM_0,
+    .scl_io_num = this->scl_pin_,
+    .sda_io_num = this->sda_pin_,
+    .glitch_ignore_cnt = 7,
+    .flags = {
+      .enable_internal_pullup = true,
+    }
+  };
+  
+  esp_err_t ret = i2c_new_master_bus(&i2c_bus_config, &this->i2c_bus_handle_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "❌ Failed to create I2C master bus: %s", esp_err_to_name(ret));
+    return false;
+  }
+  ESP_LOGI(TAG, "✅ I2C master bus created successfully");
+
+  // Étape 2: Configuration SCCB avec l'adresse I2C
+  sccb_i2c_config_t sccb_config = {
+    .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+    .device_address = this->address_,
+    .scl_speed_hz = 100000,  // 100kHz pour la compatibilité
+  };
+  
+  ret = sccb_new_i2c_io(this->i2c_bus_handle_, &sccb_config, &this->sccb_handle_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "❌ Failed to create SCCB interface: %s", esp_err_to_name(ret));
+    return false;
+  }
+  ESP_LOGI(TAG, "✅ SCCB interface created successfully");
+
+  // Étape 3: Configuration du capteur pour la détection
+  esp_cam_sensor_config_t sensor_config = {
+    .sccb_handle = this->sccb_handle_,
+    .reset_pin = this->reset_pin_ ? this->reset_pin_->get_pin() : -1,
+    .pwdn_pin = -1,  // Power down pin non utilisé
+    .xclk_pin = this->external_clock_pin_ > 0 ? this->external_clock_pin_ : -1,
+  };
+
+  // Étape 4: Tentative de détection des capteurs supportés
+  this->sensor_type_ = SENSOR_UNKNOWN;
+  this->cam_sensor_ = nullptr;
+
+#ifdef CONFIG_CAMERA_OV5645
+  ESP_LOGI(TAG, "🔍 Trying to detect OV5645 sensor...");
+  this->cam_sensor_ = ov5645_detect(&sensor_config);
+  if (this->cam_sensor_ != nullptr) {
+    this->sensor_type_ = SENSOR_OV5645;
+    ESP_LOGI(TAG, "📷 OV5645 sensor detected and initialized!");
+    return true;
+  }
+  ESP_LOGD(TAG, "OV5645 not detected");
+#endif
+
+#ifdef CONFIG_CAMERA_SC2336
+  ESP_LOGI(TAG, "🔍 Trying to detect SC2336 sensor...");
+  this->cam_sensor_ = sc2336_detect(&sensor_config);
+  if (this->cam_sensor_ != nullptr) {
+    this->sensor_type_ = SENSOR_SC2336;
+    ESP_LOGI(TAG, "📷 SC2336 sensor detected and initialized!");
+    return true;
+  }
+  ESP_LOGD(TAG, "SC2336 not detected");
+#endif
+
+  // Étape 5: Si aucun capteur spécifique détecté, utiliser la méthode générique
+  ESP_LOGW(TAG, "⚠️ No specific sensor detected, falling back to generic detection");
+  return this->init_generic_sensor_();
+}
+
+bool Tab5Camera::init_generic_sensor_() {
+  ESP_LOGI(TAG, "🔧 Initializing generic sensor configuration...");
+  
+  // Test de communication I2C de base
+  uint8_t test_data;
+  bool sensor_detected = false;
+  
+  // Test de plusieurs registres communs
+  const uint8_t test_regs[] = {0x00, 0x01, 0x02, 0x0A, 0x0B, 0x0C, 0x0D};
+  for (size_t i = 0; i < sizeof(test_regs); i++) {
+    if (this->read_byte(test_regs[i], &test_data)) {
+      ESP_LOGI(TAG, "Sensor responded: reg 0x%02X = 0x%02X", test_regs[i], test_data);
+      sensor_detected = true;
+    }
+  }
+  
+  if (!sensor_detected) {
+    ESP_LOGE(TAG, "❌ No sensor detected at I2C address 0x%02X - check wiring!", this->address_);
+    return false;
+  }
+  
+  // Tentative d'identification du capteur
+  uint8_t id_reg_1, id_reg_2;
+  if (this->read_byte(0x00, &id_reg_1) && this->read_byte(0x01, &id_reg_2)) {
+    uint16_t sensor_id = (id_reg_1 << 8) | id_reg_2;
+    ESP_LOGI(TAG, "🔍 Sensor ID: 0x%04X (reg 0x00=0x%02X, reg 0x01=0x%02X)", 
+             sensor_id, id_reg_1, id_reg_2);
+    
+    // Identification basée sur l'ID
+    switch (sensor_id) {
+      case 0x00A2: ESP_LOGI(TAG, "📷 Detected: Possible OmniVision sensor (partial ID match)"); break;
+      case 0x2640: ESP_LOGI(TAG, "📷 Detected: OV2640 sensor"); break;
+      case 0x5640: ESP_LOGI(TAG, "📷 Detected: OV5640 sensor"); break;
+      case 0x5645: ESP_LOGI(TAG, "📷 Detected: OV5645 sensor (but driver not enabled)"); break;
+      default: ESP_LOGI(TAG, "📷 Unknown sensor - will use generic configuration"); break;
+    }
+  }
+  
+  // Configuration minimale pour démarrer la capture
+  ESP_LOGI(TAG, "🔧 Configuring sensor for basic operation...");
+  
+  // Configuration basique générique
+  const struct {
+    uint8_t reg;
+    uint8_t val;
+    const char* desc;
+  } basic_config[] = {
+    {0x09, 0x00, "System control"},         // Mode normal
+    {0x15, 0x00, "Output format"},          // Format par défaut
+    {0x3A, 0x04, "TSLB register"},          // Output sequence
+  };
+  
+  for (size_t i = 0; i < sizeof(basic_config) / sizeof(basic_config[0]); i++) {
+    ESP_LOGD(TAG, "Setting %s: reg 0x%02X = 0x%02X", 
+             basic_config[i].desc, basic_config[i].reg, basic_config[i].val);
+    
+    if (!this->write_byte(basic_config[i].reg, basic_config[i].val)) {
+      ESP_LOGW(TAG, "Failed to write register 0x%02X - continuing anyway", basic_config[i].reg);
+    }
+    
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+  }
+  
+  // Vérification que le capteur répond toujours
+  uint8_t verify_reg;
+  if (this->read_byte(0x00, &verify_reg)) {
+    ESP_LOGI(TAG, "✅ Sensor still responsive after configuration (reg 0x00 = 0x%02X)", verify_reg);
+  } else {
+    ESP_LOGW(TAG, "⚠️ Sensor not responding after configuration");
+  }
+  
+  this->sensor_type_ = SENSOR_GENERIC;
+  ESP_LOGI(TAG, "ℹ️ Using minimal sensor configuration - full config needed for proper images");
+  ESP_LOGI(TAG, "✅ Generic sensor initialized with basic configuration");
+  
+  return true;
+}
+
 bool Tab5Camera::init_ldo_() {
   if (this->ldo_initialized_) {
     ESP_LOGI(TAG, "LDO already initialized, skipping");
@@ -133,100 +314,12 @@ bool Tab5Camera::init_ldo_() {
   esp_err_t ret = esp_ldo_acquire_channel(&ldo_mipi_phy_config, &this->ldo_mipi_phy_);
   if (ret != ESP_OK) {
     ESP_LOGW(TAG, "Failed to acquire MIPI LDO channel: %s - trying to continue anyway", esp_err_to_name(ret));
-    // Ne pas échouer complètement, certains boards peuvent ne pas avoir de LDO MIPI dédié
     this->ldo_mipi_phy_ = nullptr;
   } else {
     ESP_LOGI(TAG, "MIPI LDO regulator acquired successfully");
   }
   
   this->ldo_initialized_ = true;
-  return true;  // Retourner true même si le LDO échoue
-}
-
-bool Tab5Camera::init_sensor_() {
-  if (this->sensor_initialized_) {
-    ESP_LOGI(TAG, "Sensor already initialized, skipping");
-    return true;
-  }
-  
-  ESP_LOGI(TAG, "Attempting to initialize camera sensor at I2C address 0x%02X", this->address_);
-  
-  // Test de communication I2C approfondi
-  uint8_t test_data;
-  bool sensor_detected = false;
-  
-  // Test de plusieurs registres communs (8-bit seulement)
-  const uint8_t test_regs[] = {0x00, 0x01, 0x02, 0x0A, 0x0B, 0x0C, 0x0D};
-  for (size_t i = 0; i < sizeof(test_regs); i++) {
-    if (this->read_byte(test_regs[i], &test_data)) {
-      ESP_LOGI(TAG, "Sensor responded: reg 0x%02X = 0x%02X", test_regs[i], test_data);
-      sensor_detected = true;
-    }
-  }
-  
-  if (!sensor_detected) {
-    ESP_LOGE(TAG, "❌ No sensor detected at I2C address 0x%02X - check wiring!", this->address_);
-    return false;  // ← Maintenant on échoue si pas de capteur
-  }
-  
-  // Tentative d'identification du capteur
-  uint8_t id_reg_1, id_reg_2;
-  if (this->read_byte(0x00, &id_reg_1) && this->read_byte(0x01, &id_reg_2)) {
-    uint16_t sensor_id = (id_reg_1 << 8) | id_reg_2;
-    ESP_LOGI(TAG, "🔍 Sensor ID: 0x%04X (reg 0x00=0x%02X, reg 0x01=0x%02X)", 
-             sensor_id, id_reg_1, id_reg_2);
-    
-    // Identification basée sur l'ID
-    switch (sensor_id) {
-      case 0x00A2: ESP_LOGI(TAG, "📷 Detected: Possible OmniVision sensor (partial ID match)"); break;
-      case 0x2640: ESP_LOGI(TAG, "📷 Detected: OV2640 sensor"); break;
-      case 0x5640: ESP_LOGI(TAG, "📷 Detected: OV5640 sensor"); break;
-      default: ESP_LOGI(TAG, "📷 Unknown sensor - will use generic configuration"); break;
-    }
-  }
-  
-  // Configuration minimale pour démarrer la capture
-  ESP_LOGI(TAG, "🔧 Configuring sensor for basic operation...");
-  
-  // Configuration basique générique - éviter les registres problématiques
-  const struct {
-    uint8_t reg;
-    uint8_t val;
-    const char* desc;
-  } basic_config[] = {
-    // Configuration très basique, éviter 0x12 (reset) qui pose problème
-    {0x09, 0x00, "System control"},         // Mode normal
-    {0x15, 0x00, "Output format"},          // Format par défaut
-    {0x3A, 0x04, "TSLB register"},          // Output sequence
-    // Configuration minimale pour test
-  };
-  
-  for (size_t i = 0; i < sizeof(basic_config) / sizeof(basic_config[0]); i++) {
-    ESP_LOGD(TAG, "Setting %s: reg 0x%02X = 0x%02X", 
-             basic_config[i].desc, basic_config[i].reg, basic_config[i].val);
-    
-    if (!this->write_byte(basic_config[i].reg, basic_config[i].val)) {
-      ESP_LOGW(TAG, "Failed to write register 0x%02X - continuing anyway", basic_config[i].reg);
-    }
-    
-    vTaskDelay(10 / portTICK_PERIOD_MS);  // Délai entre les écritures
-  }
-  
-  // Vérification basique - test si le capteur répond toujours
-  uint8_t verify_reg;
-  if (this->read_byte(0x00, &verify_reg)) {
-    ESP_LOGI(TAG, "✅ Sensor still responsive after configuration (reg 0x00 = 0x%02X)", verify_reg);
-  } else {
-    ESP_LOGW(TAG, "⚠️ Sensor not responding after configuration");
-  }
-  
-  // Pour l'instant, on considère que même sans configuration complète,
-  // le pipeline MIPI peut recevoir des données du capteur
-  ESP_LOGI(TAG, "ℹ️ Using minimal sensor configuration - full config needed for proper images");
-  
-  this->sensor_initialized_ = true;
-  ESP_LOGI(TAG, "✅ Camera sensor initialized with basic configuration");
-  
   return true;
 }
 
@@ -259,10 +352,10 @@ bool Tab5Camera::init_camera_() {
     ESP_LOGI(TAG, "Step 2.2: No reset pin configured, skipping reset");
   }
 
-  // Étape 3: Initialisation du capteur I2C
-  ESP_LOGI(TAG, "Step 2.3: Initializing camera sensor");
-  if (!this->init_sensor_()) {
-    ESP_LOGE(TAG, "Failed to initialize camera sensor");
+  // Étape 3: Détection et initialisation du capteur avec ESP-IDF
+  ESP_LOGI(TAG, "Step 2.3: Detecting and initializing camera sensor");
+  if (!this->detect_and_init_sensor_()) {
+    ESP_LOGE(TAG, "Failed to detect and initialize camera sensor");
     return false;
   }
   ESP_LOGI(TAG, "Camera sensor initialized successfully");
@@ -304,7 +397,7 @@ bool Tab5Camera::init_camera_() {
   csi_config.output_data_color_type = CAM_CTLR_COLOR_RGB565;
   csi_config.data_lane_num = 2;
   csi_config.byte_swap_en = false;
-  csi_config.queue_items = 4;  // ← AUGMENTÉ: plus de buffers dans la queue
+  csi_config.queue_items = 4;
 
   esp_err_t ret = esp_cam_new_csi_ctlr(&csi_config, &this->cam_handle_);
   if (ret != ESP_OK) {
@@ -313,10 +406,10 @@ bool Tab5Camera::init_camera_() {
   }
   ESP_LOGI(TAG, "CSI controller created successfully");
   
-  // Étape 6: Configuration des callbacks - CORRECTION CRITIQUE
+  // Étape 6: Configuration des callbacks
   ESP_LOGI(TAG, "Step 2.6: Registering camera callbacks");
   esp_cam_ctlr_evt_cbs_t cbs = {
-    .on_get_new_trans = nullptr,  // ← IMPORTANT: laisser à nullptr pour utiliser la queue interne !
+    .on_get_new_trans = nullptr,
     .on_trans_finished = Tab5Camera::camera_get_finished_trans_callback,
   };
   
@@ -402,6 +495,22 @@ void Tab5Camera::deinit_camera_() {
       this->isp_proc_ = nullptr;
     }
     
+    // Nettoyage du capteur ESP-IDF
+    if (this->cam_sensor_) {
+      esp_cam_sensor_del_dev(this->cam_sensor_);
+      this->cam_sensor_ = nullptr;
+    }
+    
+    if (this->sccb_handle_) {
+      esp_sccb_del_i2c_io(this->sccb_handle_);
+      this->sccb_handle_ = nullptr;
+    }
+    
+    if (this->i2c_bus_handle_) {
+      i2c_del_master_bus(this->i2c_bus_handle_);
+      this->i2c_bus_handle_ = nullptr;
+    }
+    
     if (this->frame_buffer_) {
       heap_caps_free(this->frame_buffer_);
       this->frame_buffer_ = nullptr;
@@ -413,8 +522,8 @@ void Tab5Camera::deinit_camera_() {
     }
     
     this->camera_initialized_ = false;
-    this->sensor_initialized_ = false;
     this->ldo_initialized_ = false;
+    this->sensor_type_ = SENSOR_UNKNOWN;
     ESP_LOGD(TAG, "Camera '%s' deinitialized", this->name_.c_str());
   }
   
@@ -430,15 +539,7 @@ void Tab5Camera::deinit_camera_() {
   }
 }
 
-// SUPPRIMÉ - Cette fonction causait le problème de queue pleine !
-// Elle empêchait la queue interne du contrôleur CSI de fonctionner correctement
-/*
-bool Tab5Camera::camera_get_new_vb_callback(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data) {
-  // Cette fonction est supprimée - elle causait le conflit avec la queue interne
-}
-*/
-
-// CORRIGÉ - Callback de fin de transaction avec diagnostics
+// Callback de fin de transaction avec diagnostics
 bool Tab5Camera::camera_get_finished_trans_callback(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data) {
   Tab5Camera *camera = static_cast<Tab5Camera*>(user_data);
   if (!camera || !trans->buffer) {
@@ -459,7 +560,7 @@ bool Tab5Camera::camera_get_finished_trans_callback(esp_cam_ctlr_handle_t handle
     return false;
   }
   
-  if (trans->received_size < 1000) {  // Taille suspicieusement petite
+  if (trans->received_size < 1000) {
     ESP_LOGW(TAG, "⚠️ Frame #%lu size is very small (%zu bytes)", frame_count, trans->received_size);
   }
 
@@ -484,11 +585,10 @@ bool Tab5Camera::camera_get_finished_trans_callback(esp_cam_ctlr_handle_t handle
     xSemaphoreGiveFromISR(camera->frame_ready_semaphore_, NULL);
     ESP_LOGV(TAG, "Frame #%lu queued successfully", frame_count);
   } else {
-    // Queue pleine - on peut choisir d'overwrite ou de dropper
     ESP_LOGD(TAG, "Application frame queue full, dropping frame #%lu", frame_count);
   }
 
-  return false;
+  return false
 }
 
 bool Tab5Camera::take_snapshot() {
