@@ -282,12 +282,6 @@ bool Tab5Camera::write_sc2356_register_(uint16_t reg, uint8_t value) {
 }
 
 
-
-bool Tab5Camera::write_sc2356_register_16_(uint16_t reg, uint16_t value) {
-  return this->write_sc2356_register_(reg, (value >> 8) & 0xFF) &&
-         this->write_sc2356_register_(reg + 1, value & 0xFF);
-}
-
 bool Tab5Camera::reset_sc2356_() {
   ESP_LOGI(TAG, "🔄 Resetting SC2356 sensor");
   
