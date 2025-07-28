@@ -151,20 +151,68 @@ bool Tab5Camera::init_sensor_() {
   
   ESP_LOGI(TAG, "Attempting to initialize camera sensor at I2C address 0x%02X", this->address_);
   
-  // Test de communication I2C simple
+  // Test de communication I2C approfondi
   uint8_t test_data;
-  if (!this->read_byte(0x00, &test_data)) {
-    ESP_LOGW(TAG, "Could not read from sensor at address 0x%02X - sensor might not be connected", this->address_);
-    // Pour l'instant, ne pas échouer si le capteur ne répond pas
-    // return false;
-  } else {
-    ESP_LOGI(TAG, "Sensor responded to I2C communication (reg 0x00 = 0x%02X)", test_data);
+  bool sensor_detected = false;
+  
+  // Test de plusieurs registres communs
+  const uint8_t test_regs[] = {0x00, 0x01, 0x02, 0x0A, 0x0B, 0x300A, 0x300B};
+  for (size_t i = 0; i < sizeof(test_regs); i++) {
+    if (this->read_byte(test_regs[i], &test_data)) {
+      ESP_LOGI(TAG, "Sensor responded: reg 0x%02X = 0x%02X", test_regs[i], test_data);
+      sensor_detected = true;
+    }
   }
   
-  // Configuration basique du capteur (à adapter selon ton modèle)
-  // Pour l'instant, marquer comme initialisé même sans configuration complète
+  if (!sensor_detected) {
+    ESP_LOGE(TAG, "❌ No sensor detected at I2C address 0x%02X - check wiring!", this->address_);
+    return false;  // ← Maintenant on échoue si pas de capteur
+  }
+  
+  // Configuration minimale pour démarrer la capture
+  ESP_LOGI(TAG, "🔧 Configuring sensor for basic operation...");
+  
+  // Configuration basique générique (à adapter selon votre capteur exact)
+  // Ces registres sont communs à beaucoup de capteurs MIPI
+  const struct {
+    uint16_t reg;
+    uint8_t val;
+    const char* desc;
+  } basic_config[] = {
+    // Exemple de configuration basique - À ADAPTER selon votre capteur !
+    {0x0100, 0x00, "Stream off"},           // Arrêter le streaming
+    {0x0103, 0x01, "Software reset"},       // Reset logiciel
+    // Vous devez ajouter ici la configuration spécifique à votre capteur
+    // {0x3008, 0x82, "System control"},    // Exemple pour OV2640
+    // {0x3103, 0x03, "System control"},    // Exemple pour OV2640
+    {0x0100, 0x01, "Stream on"},            // Démarrer le streaming
+  };
+  
+  for (size_t i = 0; i < sizeof(basic_config) / sizeof(basic_config[0]); i++) {
+    ESP_LOGD(TAG, "Setting %s: reg 0x%04X = 0x%02X", 
+             basic_config[i].desc, basic_config[i].reg, basic_config[i].val);
+    
+    if (!this->write_byte(basic_config[i].reg, basic_config[i].val)) {
+      ESP_LOGW(TAG, "Failed to write register 0x%04X", basic_config[i].reg);
+    }
+    
+    vTaskDelay(10 / portTICK_PERIOD_MS);  // Délai entre les écritures
+  }
+  
+  // Vérification que le streaming est activé
+  uint8_t stream_status;
+  if (this->read_byte(0x0100, &stream_status)) {
+    ESP_LOGI(TAG, "Stream status register: 0x%02X", stream_status);
+    if (stream_status & 0x01) {
+      ESP_LOGI(TAG, "✅ Sensor streaming enabled");
+    } else {
+      ESP_LOGW(TAG, "⚠️ Sensor streaming might not be enabled");
+    }
+  }
+  
   this->sensor_initialized_ = true;
-  ESP_LOGI(TAG, "Camera sensor marked as initialized");
+  ESP_LOGI(TAG, "✅ Camera sensor initialized with basic configuration");
+  
   return true;
 }
 
@@ -376,7 +424,7 @@ bool Tab5Camera::camera_get_new_vb_callback(esp_cam_ctlr_handle_t handle, esp_ca
 }
 */
 
-// CORRIGÉ - Callback de fin de transaction uniquement
+// CORRIGÉ - Callback de fin de transaction avec diagnostics
 bool Tab5Camera::camera_get_finished_trans_callback(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data) {
   Tab5Camera *camera = static_cast<Tab5Camera*>(user_data);
   if (!camera || !trans->buffer) {
@@ -384,13 +432,35 @@ bool Tab5Camera::camera_get_finished_trans_callback(esp_cam_ctlr_handle_t handle
     return false;
   }
 
+  // Compteur de frames pour diagnostics
+  static uint32_t frame_count = 0;
+  frame_count++;
+  
+  ESP_LOGI(TAG, "📸 Frame #%lu received: %zu bytes (expected: %zu)", 
+           frame_count, trans->received_size, camera->frame_buffer_size_);
+
+  // Vérification de la taille des données
+  if (trans->received_size == 0) {
+    ESP_LOGW(TAG, "⚠️ Frame #%lu is empty - sensor might not be generating data", frame_count);
+    return false;
+  }
+  
+  if (trans->received_size < 1000) {  // Taille suspicieusement petite
+    ESP_LOGW(TAG, "⚠️ Frame #%lu size is very small (%zu bytes)", frame_count, trans->received_size);
+  }
+
   // Synchronisation du cache pour la frame reçue
   esp_cache_msync(trans->buffer, trans->received_size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+  
+  // Vérification du contenu des premiers bytes (diagnostics)
+  uint8_t *data = static_cast<uint8_t*>(trans->buffer);
+  ESP_LOGD(TAG, "Frame #%lu first bytes: %02X %02X %02X %02X %02X %02X %02X %02X", 
+           frame_count, data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]);
   
   // Création d'une structure FrameData avec les vraies données reçues
   FrameData frame;
   frame.buffer = trans->buffer;
-  frame.size = trans->received_size;  // Utiliser received_size, pas buflen
+  frame.size = trans->received_size;
   frame.timestamp = esp_timer_get_time();
   
   // Envoi non-bloquant vers la queue applicative
@@ -398,9 +468,10 @@ bool Tab5Camera::camera_get_finished_trans_callback(esp_cam_ctlr_handle_t handle
   if (ret == pdTRUE) {
     // Signaler qu'une frame est disponible
     xSemaphoreGiveFromISR(camera->frame_ready_semaphore_, NULL);
+    ESP_LOGV(TAG, "Frame #%lu queued successfully", frame_count);
   } else {
     // Queue pleine - on peut choisir d'overwrite ou de dropper
-    ESP_LOGD(TAG, "Application frame queue full, dropping frame");
+    ESP_LOGD(TAG, "Application frame queue full, dropping frame #%lu", frame_count);
   }
 
   return false;
@@ -560,7 +631,6 @@ void Tab5Camera::streaming_loop_() {
 }  // namespace esphome
 
 #endif  // USE_ESP32
-
 
 
 
