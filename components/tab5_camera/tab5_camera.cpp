@@ -252,34 +252,41 @@ bool Tab5Camera::init_ldo_() {
 }
 
 bool Tab5Camera::read_sc2356_register_(uint16_t reg, uint8_t *value) {
-  // SC2356 utilise des adresses de registre 16-bit
-  uint8_t reg_addr[2] = {(reg >> 8) & 0xFF, reg & 0xFF};
+  uint8_t reg_addr[2] = {static_cast<uint8_t>(reg >> 8), static_cast<uint8_t>(reg & 0xFF)};
   
-  if (!this->write_bytes_raw(reg_addr, 2) ||
-      !this->read_bytes_raw(value, 1)) {
+  if (!this->write_bytes_raw_(reg_addr, 2) ||
+      !this->read_bytes_raw_(value, 1)) {
     ESP_LOGD(TAG, "Failed to read SC2356 register 0x%04X", reg);
     return false;
   }
-  
+
   ESP_LOGV(TAG, "SC2356 reg 0x%04X = 0x%02X", reg, *value);
   return true;
 }
 
 bool Tab5Camera::write_sc2356_register_(uint16_t reg, uint8_t value) {
-  uint8_t data[3] = {(reg >> 8) & 0xFF, reg & 0xFF, value};
-  
-  if (!this->write_bytes_raw(data, 3)) {
+  uint8_t data[3] = {
+    static_cast<uint8_t>(reg >> 8),
+    static_cast<uint8_t>(reg & 0xFF),
+    value
+  };
+
+  if (!this->write_bytes_raw_(data, 3)) {
     ESP_LOGD(TAG, "Failed to write SC2356 register 0x%04X = 0x%02X", reg, value);
     return false;
   }
-  
+
   ESP_LOGV(TAG, "SC2356 reg 0x%04X <= 0x%02X", reg, value);
   return true;
 }
 
-bool Tab5Camera::write_sc2356_register_16_(uint16_t reg, uint16_t value) {
-  return this->write_sc2356_register_(reg, (value >> 8) & 0xFF) &&
-         this->write_sc2356_register_(reg + 1, value & 0xFF);
+
+bool Tab5Camera::write_bytes_raw_(const uint8_t *data, size_t len) {
+  return this->parent_->write(this->get_i2c_address(), data, len);
+}
+
+bool Tab5Camera::read_bytes_raw_(uint8_t *data, size_t len) {
+  return this->parent_->read(this->get_i2c_address(), data, len);
 }
 
 bool Tab5Camera::reset_sc2356_() {
