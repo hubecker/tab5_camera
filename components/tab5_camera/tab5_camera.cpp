@@ -98,6 +98,12 @@ void Tab5Camera::dump_config() {
   ESP_LOGCONFIG(TAG, "  Streaming Support: Available");
   ESP_LOGCONFIG(TAG, "  I2C Address: 0x%02X", this->address_);
   
+  // Affichage du capteur détecté si disponible
+  if (this->detected_sensor_id_ != 0) {
+    ESP_LOGCONFIG(TAG, "  Detected Sensor: ID 0x%04X at address 0x%02X", 
+                  this->detected_sensor_id_, this->detected_sensor_address_);
+  }
+  
   if (this->reset_pin_) {
     LOG_PIN("  Reset Pin: ", this->reset_pin_);
   }
@@ -143,91 +149,400 @@ bool Tab5Camera::init_ldo_() {
   return true;  // Retourner true même si le LDO échoue
 }
 
+// NOUVELLE MÉTHODE: Détection automatique du capteur
+uint16_t Tab5Camera::detect_sensor_id_() {
+  ESP_LOGI(TAG, "Detecting Tab5 camera sensor...");
+  
+  // Test des adresses I2C connues pour Tab5
+  const struct {
+    uint8_t address;
+    const char* name;
+    uint16_t id_reg_high;
+    uint16_t id_reg_low;
+    uint16_t expected_id;
+  } sensor_configs[] = {
+    {OV5645_SCCB_ADDR, "OV5645", 0x300A, 0x300B, OV5645_CHIP_ID},
+    {SC2336_SCCB_ADDR, "SC2336", 0x3107, 0x3108, SC2336_CHIP_ID},
+    {SC2356_SCCB_ADDR, "SC2356", 0x3107, 0x3108, SC2356_CHIP_ID},
+    // Adresses alternatives
+    {0x78, "OV5645_ALT", 0x300A, 0x300B, OV5645_CHIP_ID},
+    {0x60, "SC2336_ALT", 0x3107, 0x3108, SC2336_CHIP_ID},
+  };
+  
+  for (size_t i = 0; i < sizeof(sensor_configs) / sizeof(sensor_configs[0]); i++) {
+    ESP_LOGI(TAG, "Testing %s at I2C address 0x%02X...", 
+             sensor_configs[i].name, sensor_configs[i].address);
+    
+    // Temporairement changer l'adresse pour le test
+    uint8_t original_addr = this->address_;
+    this->address_ = sensor_configs[i].address;
+    
+    // Test de communication basique
+    if (!this->test_sensor_communication_(sensor_configs[i].address)) {
+      this->address_ = original_addr;
+      continue;
+    }
+    
+    // Lecture des registres d'ID
+    uint8_t id_high, id_low;
+    if (this->read_byte_16(sensor_configs[i].id_reg_high, &id_high) && 
+        this->read_byte_16(sensor_configs[i].id_reg_low, &id_low)) {
+      
+      uint16_t sensor_id = (id_high << 8) | id_low;
+      ESP_LOGI(TAG, "%s ID registers: 0x%04X=0x%02X, 0x%04X=0x%02X, Combined ID=0x%04X", 
+               sensor_configs[i].name,
+               sensor_configs[i].id_reg_high, id_high, 
+               sensor_configs[i].id_reg_low, id_low, 
+               sensor_id);
+      
+      if (sensor_id == sensor_configs[i].expected_id) {
+        ESP_LOGI(TAG, "✅ Detected %s sensor (ID: 0x%04X) at address 0x%02X", 
+                 sensor_configs[i].name, sensor_id, sensor_configs[i].address);
+        
+        // Sauvegarder les informations du capteur détecté
+        this->detected_sensor_id_ = sensor_id;
+        this->detected_sensor_address_ = sensor_configs[i].address;
+        
+        // Garder cette adresse pour la suite
+        return sensor_id;
+      }
+    }
+    
+    // Restaurer l'adresse originale si pas de match
+    this->address_ = original_addr;
+    vTaskDelay(50 / portTICK_PERIOD_MS);
+  }
+  
+  ESP_LOGE(TAG, "❌ No compatible Tab5 sensor detected!");
+  return 0;
+}
+
+// NOUVELLE MÉTHODE: Test de communication avec un capteur
+bool Tab5Camera::test_sensor_communication_(uint8_t address) {
+  // Test de lecture de quelques registres pour vérifier la communication
+  uint8_t test_data;
+  int successful_reads = 0;
+  
+  // Pour les capteurs OmniVision, tester les registres de base
+  if (address == OV5645_SCCB_ADDR || address == 0x78) {
+    if (this->read_byte_16(0x300A, &test_data)) successful_reads++;
+    if (this->read_byte_16(0x300B, &test_data)) successful_reads++;
+    if (this->read_byte_16(0x3008, &test_data)) successful_reads++;
+  }
+  // Pour les capteurs SmartSens, tester leurs registres
+  else if (address == SC2336_SCCB_ADDR || address == SC2356_SCCB_ADDR || address == 0x60) {
+    if (this->read_byte_16(0x3107, &test_data)) successful_reads++;
+    if (this->read_byte_16(0x3108, &test_data)) successful_reads++;
+    if (this->read_byte_16(0x0100, &test_data)) successful_reads++;
+  }
+  
+  return successful_reads >= 2;  // Au moins 2 lectures réussies
+}
+
+// MÉTHODE MISE À JOUR: Initialisation du capteur avec détection automatique
 bool Tab5Camera::init_sensor_() {
   if (this->sensor_initialized_) {
     ESP_LOGI(TAG, "Sensor already initialized, skipping");
     return true;
   }
   
-  ESP_LOGI(TAG, "Attempting to initialize camera sensor at I2C address 0x%02X", this->address_);
+  ESP_LOGI(TAG, "Starting Tab5 sensor detection and initialization...");
   
-  // Test de communication I2C approfondi
-  uint8_t test_data;
-  bool sensor_detected = false;
-  
-  // Test de plusieurs registres communs (8-bit seulement)
-  const uint8_t test_regs[] = {0x00, 0x01, 0x02, 0x0A, 0x0B, 0x0C, 0x0D};
-  for (size_t i = 0; i < sizeof(test_regs); i++) {
-    if (this->read_byte(test_regs[i], &test_data)) {
-      ESP_LOGI(TAG, "Sensor responded: reg 0x%02X = 0x%02X", test_regs[i], test_data);
-      sensor_detected = true;
-    }
+  // Détection automatique du capteur
+  uint16_t sensor_id = this->detect_sensor_id_();
+  if (sensor_id == 0) {
+    ESP_LOGE(TAG, "No compatible sensor detected!");
+    return false;
   }
   
-  if (!sensor_detected) {
-    ESP_LOGE(TAG, " No sensor detected at I2C address 0x%02X - check wiring!", this->address_);
-    return false;  // ← Maintenant on échoue si pas de capteur
+  // Configuration spécifique selon le capteur détecté
+  bool config_success = false;
+  switch (sensor_id) {
+    case OV5645_CHIP_ID:
+      ESP_LOGI(TAG, "Configuring OV5645 sensor...");
+      config_success = this->configure_ov5645_();
+      break;
+      
+    case SC2336_CHIP_ID:
+      ESP_LOGI(TAG, "Configuring SC2336 sensor...");
+      config_success = this->configure_sc2336_();
+      break;
+      
+    case SC2356_CHIP_ID:
+      ESP_LOGI(TAG, "Configuring SC2356 sensor...");
+      config_success = this->configure_sc2356_();
+      break;
+      
+    default:
+      ESP_LOGE(TAG, "Unknown sensor ID: 0x%04X", sensor_id);
+      return false;
   }
   
-  // Tentative d'identification du capteur
-  uint8_t id_reg_1, id_reg_2;
-  if (this->read_byte(0x00, &id_reg_1) && this->read_byte(0x01, &id_reg_2)) {
-    uint16_t sensor_id = (id_reg_1 << 8) | id_reg_2;
-    ESP_LOGI(TAG, " Sensor ID: 0x%04X (reg 0x00=0x%02X, reg 0x01=0x%02X)", 
-             sensor_id, id_reg_1, id_reg_2);
-    
-    // Identification basée sur l'ID
-    switch (sensor_id) {
-      case 0x00A2: ESP_LOGI(TAG, " Detected: Possible OmniVision sensor (partial ID match)"); break;
-      case 0x2640: ESP_LOGI(TAG, " Detected: OV2640 sensor"); break;
-      case 0x5640: ESP_LOGI(TAG, " Detected: OV5640 sensor"); break;
-      default: ESP_LOGI(TAG, " Unknown sensor - will use generic configuration"); break;
-    }
+  if (!config_success) {
+    ESP_LOGE(TAG, "Failed to configure sensor ID 0x%04X", sensor_id);
+    return false;
   }
-  
-  // Configuration minimale pour démarrer la capture
-  ESP_LOGI(TAG, " Configuring sensor for basic operation...");
-  
-  // Configuration basique générique - éviter les registres problématiques
-  const struct {
-    uint8_t reg;
-    uint8_t val;
-    const char* desc;
-  } basic_config[] = {
-    // Configuration très basique, éviter 0x12 (reset) qui pose problème
-    {0x09, 0x00, "System control"},         // Mode normal
-    {0x15, 0x00, "Output format"},          // Format par défaut
-    {0x3A, 0x04, "TSLB register"},          // Output sequence
-    // Configuration minimale pour test
-  };
-  
-  for (size_t i = 0; i < sizeof(basic_config) / sizeof(basic_config[0]); i++) {
-    ESP_LOGD(TAG, "Setting %s: reg 0x%02X = 0x%02X", 
-             basic_config[i].desc, basic_config[i].reg, basic_config[i].val);
-    
-    if (!this->write_byte(basic_config[i].reg, basic_config[i].val)) {
-      ESP_LOGW(TAG, "Failed to write register 0x%02X - continuing anyway", basic_config[i].reg);
-    }
-    
-    vTaskDelay(10 / portTICK_PERIOD_MS);  // Délai entre les écritures
-  }
-  
-  // Vérification basique - test si le capteur répond toujours
-  uint8_t verify_reg;
-  if (this->read_byte(0x00, &verify_reg)) {
-    ESP_LOGI(TAG, " Sensor still responsive after configuration (reg 0x00 = 0x%02X)", verify_reg);
-  } else {
-    ESP_LOGW(TAG, " Sensor not responding after configuration");
-  }
-  
-  // Pour l'instant, on considère que même sans configuration complète,
-  // le pipeline MIPI peut recevoir des données du capteur
-  ESP_LOGI(TAG, " Using minimal sensor configuration - full config needed for proper images");
   
   this->sensor_initialized_ = true;
-  ESP_LOGI(TAG, " Camera sensor initialized with basic configuration");
-  
+  ESP_LOGI(TAG, "✅ Tab5 sensor initialized successfully");
   return true;
+}
+
+// NOUVELLE MÉTHODE: Configuration spécifique OV5645
+bool Tab5Camera::configure_ov5645_() {
+  ESP_LOGI(TAG, "Configuring OV5645 sensor for 640x480 @ 30fps...");
+  
+  // Configuration OV5645 optimisée pour Tab5
+  const struct {
+    uint16_t reg;
+    uint8_t val;
+    const char* desc;
+    uint16_t delay_ms;
+  } ov5645_config[] = {
+    // Software reset et initialization
+    {0x3103, 0x11, "System control", 0},
+    {0x3008, 0x82, "Software reset", 100},  // Délai important après reset
+    
+    // Clock settings
+    {0x3017, 0x40, "IO direction control", 0},
+    {0x3018, 0x00, "IO direction control", 0},
+    {0x3034, 0x18, "PLL control", 0},
+    {0x3035, 0x14, "PLL control", 0},
+    {0x3036, 0x38, "PLL control", 0},
+    {0x3037, 0x13, "PLL control", 10},
+    
+    // Format control pour RAW8 vers RGB565
+    {0x4300, 0x6f, "Format control", 0},
+    {0x501f, 0x01, "Format MUX control", 0},
+    
+    // Window size pour 640x480
+    {0x3800, 0x00, "X start high", 0},
+    {0x3801, 0x00, "X start low", 0},
+    {0x3802, 0x00, "Y start high", 0},
+    {0x3803, 0x04, "Y start low", 0},
+    {0x3804, 0x0a, "X end high", 0},
+    {0x3805, 0x3f, "X end low", 0},
+    {0x3806, 0x07, "Y end high", 0},
+    {0x3807, 0x9b, "Y end low", 0},
+    
+    // Output size 640x480
+    {0x3808, 0x02, "X output size high", 0},
+    {0x3809, 0x80, "X output size low", 0},  // 640
+    {0x380a, 0x01, "Y output size high", 0},
+    {0x380b, 0xe0, "Y output size low", 0},  // 480
+    
+    // Timing
+    {0x380c, 0x07, "HTS high", 0},
+    {0x380d, 0x68, "HTS low", 0},
+    {0x380e, 0x03, "VTS high", 0},
+    {0x380f, 0xd8, "VTS low", 0},
+    
+    // Subsample et binning
+    {0x3810, 0x00, "X offset high", 0},
+    {0x3811, 0x10, "X offset low", 0},
+    {0x3812, 0x00, "Y offset high", 0},
+    {0x3813, 0x06, "Y offset low", 0},
+    {0x3814, 0x31, "X increment", 0},
+    {0x3815, 0x31, "Y increment", 0},
+    
+    // Contrôles d'exposition
+    {0x3503, 0x07, "AEC/AGC control", 0},
+    
+    // MIPI settings
+    {0x300e, 0x45, "MIPI control", 0},
+    {0x302e, 0x08, "MIPI control", 0},
+    
+    // Start streaming
+    {0x3008, 0x02, "Normal operation", 20},
+  };
+  
+  for (size_t i = 0; i < sizeof(ov5645_config) / sizeof(ov5645_config[0]); i++) {
+    ESP_LOGD(TAG, "Writing %s: reg 0x%04X = 0x%02X", 
+             ov5645_config[i].desc, ov5645_config[i].reg, ov5645_config[i].val);
+    
+    if (!this->write_byte_16(ov5645_config[i].reg, ov5645_config[i].val)) {
+      ESP_LOGW(TAG, "Failed to write OV5645 register 0x%04X - continuing", ov5645_config[i].reg);
+    }
+    
+    if (ov5645_config[i].delay_ms > 0) {
+      vTaskDelay(ov5645_config[i].delay_ms / portTICK_PERIOD_MS);
+    } else {
+      vTaskDelay(5 / portTICK_PERIOD_MS);  // Délai minimal entre écritures
+    }
+  }
+  
+  ESP_LOGI(TAG, "✅ OV5645 sensor configured successfully");
+  return true;
+}
+
+// NOUVELLE MÉTHODE: Configuration spécifique SC2336
+bool Tab5Camera::configure_sc2336_() {
+  ESP_LOGI(TAG, "Configuring SC2336 sensor for 640x480...");
+  
+  // Configuration SC2336 optimisée pour Tab5
+  const struct {
+    uint16_t reg;
+    uint8_t val;
+    const char* desc;
+    uint16_t delay_ms;
+  } sc2336_config[] = {
+    // Software reset
+    {0x0103, 0x01, "Software reset", 100},
+    
+    // System control
+    {0x0100, 0x00, "Standby mode", 10},
+    
+    // Clock settings
+    {0x300c, 0x64, "PLL control", 0},
+    {0x300d, 0x00, "PLL control", 0},
+    {0x300e, 0x02, "PLL control", 0},
+    {0x300f, 0x00, "PLL control", 10},
+    
+    // Format settings pour RAW8
+    {0x3018, 0x32, "MIPI control", 0},
+    {0x3019, 0x0c, "MIPI control", 0},
+    
+    // Window settings pour 640x480
+    {0x3200, 0x00, "X start high", 0},
+    {0x3201, 0x04, "X start low", 0},  
+    {0x3202, 0x00, "Y start high", 0},
+    {0x3203, 0x04, "Y start low", 0},
+    {0x3204, 0x02, "X end high", 0},
+    {0x3205, 0x8b, "X end low", 0},
+    {0x3206, 0x01, "Y end high", 0},
+    {0x3207, 0xeb, "Y end low", 0},
+    
+    // Output size
+    {0x3208, 0x02, "X output size high", 0},
+    {0x3209, 0x80, "X output size low", 0},  // 640
+    {0x320a, 0x01, "Y output size high", 0}, 
+    {0x320b, 0xe0, "Y output size low", 0},  // 480
+    
+    // Timing
+    {0x320c, 0x05, "HTS high", 0},
+    {0x320d, 0x46, "HTS low", 0},
+    {0x320e, 0x02, "VTS high", 0},
+    {0x320f, 0x58, "VTS low", 0},
+    
+    // MIPI settings
+    {0x3301, 0x05, "MIPI settings", 0},
+    {0x3304, 0x28, "MIPI settings", 0},
+    {0x3306, 0x30, "MIPI settings", 0},
+    
+    // Start streaming
+    {0x0100, 0x01, "Start streaming", 20},
+  };
+  
+  for (size_t i = 0; i < sizeof(sc2336_config) / sizeof(sc2336_config[0]); i++) {
+    ESP_LOGD(TAG, "Writing %s: reg 0x%04X = 0x%02X", 
+             sc2336_config[i].desc, sc2336_config[i].reg, sc2336_config[i].val);
+    
+    if (!this->write_byte_16(sc2336_config[i].reg, sc2336_config[i].val)) {
+      ESP_LOGW(TAG, "Failed to write SC2336 register 0x%04X - continuing", sc2336_config[i].reg);
+    }
+    
+    if (sc2336_config[i].delay_ms > 0) {
+      vTaskDelay(sc2336_config[i].delay_ms / portTICK_PERIOD_MS);
+    } else {
+      vTaskDelay(5 / portTICK_PERIOD_MS);
+    }
+  }
+  
+  ESP_LOGI(TAG, "✅ SC2336 sensor configured successfully");
+  return true;
+}
+
+// NOUVELLE MÉTHODE: Configuration spécifique SC2356
+bool Tab5Camera::configure_sc2356_() {
+  ESP_LOGI(TAG, "Configuring SC2356 sensor for 640x480...");
+  
+  // Configuration SC2356 (similaire à SC2336 mais avec quelques différences)
+  const struct {
+    uint16_t reg;
+    uint8_t val;
+    const char* desc;
+    uint16_t delay_ms;
+  } sc2356_config[] = {
+    // Software reset
+    {0x0103, 0x01, "Software reset", 100},
+    
+    // System control
+    {0x0100, 0x00, "Standby mode", 10},
+    
+    // Clock settings (ajustés pour SC2356)
+    {0x300c, 0x50, "PLL control", 0},
+    {0x300d, 0x00, "PLL control", 0},
+    {0x300e, 0x02, "PLL control", 0},
+    {0x300f, 0x00, "PLL control", 10},
+    
+    // Format settings pour RAW8
+    {0x3018, 0x32, "MIPI control", 0},
+    {0x3019, 0x0c, "MIPI control", 0},
+    
+    // Window settings pour 640x480
+    {0x3200, 0x00, "X start high", 0},
+    {0x3201, 0x08, "X start low", 0},  
+    {0x3202, 0x00, "Y start high", 0},
+    {0x3203, 0x08, "Y start low", 0},
+    {0x3204, 0x02, "X end high", 0},
+    {0x3205, 0x87, "X end low", 0},
+    {0x3206, 0x01, "Y end high", 0},
+    {0x3207, 0xe7, "Y end low", 0},
+    
+    // Output size
+    {0x3208, 0x02, "X output size high", 0},
+    {0x3209, 0x80, "X output size low", 0},  // 640
+    {0x320a, 0x01, "Y output size high", 0}, 
+    {0x320b, 0xe0, "Y output size low", 0},  // 480
+    
+    // Timing (ajusté pour SC2356)
+    {0x320c, 0x05, "HTS high", 0},
+    {0x320d, 0x46, "HTS low", 0},
+    {0x320e, 0x02, "VTS high", 0},
+    {0x320f, 0x58, "VTS low", 0},
+    
+    // MIPI settings
+    {0x3301, 0x05, "MIPI settings", 0},
+    {0x3304, 0x28, "MIPI settings", 0},
+    {0x3306, 0x30, "MIPI settings", 0},
+    
+    // Start streaming
+    {0x0100, 0x01, "Start streaming", 20},
+  };
+  
+  for (size_t i = 0; i < sizeof(sc2356_config) / sizeof(sc2356_config[0]); i++) {
+    ESP_LOGD(TAG, "Writing %s: reg 0x%04X = 0x%02X", 
+             sc2356_config[i].desc, sc2356_config[i].reg, sc2356_config[i].val);
+    
+    if (!this->write_byte_16(sc2356_config[i].reg, sc2356_config[i].val)) {
+      ESP_LOGW(TAG, "Failed to write SC2356 register 0x%04X - continuing", sc2356_config[i].reg);
+    }
+    
+    if (sc2356_config[i].delay_ms > 0) {
+      vTaskDelay(sc2356_config[i].delay_ms / portTICK_PERIOD_MS);
+    } else {
+      vTaskDelay(5 / portTICK_PERIOD_MS);
+    }
+  }
+  
+  ESP_LOGI(TAG, "✅ SC2356 sensor configured successfully");
+  return true;
+}
+
+// NOUVELLES MÉTHODES: Communication I2C 16-bit
+bool Tab5Camera::read_byte_16(uint16_t reg, uint8_t *data) {
+  uint8_t reg_buf[2] = {(uint8_t)(reg >> 8), (uint8_t)(reg & 0xFF)};
+  
+  if (!this->write(reg_buf, 2, false)) {
+    return false;
+  }
+  
+  return this->read(data, 1);
+}
+
+bool Tab5Camera::write_byte_16(uint16_t reg, uint8_t data) {
+  uint8_t buf[3] = {(uint8_t)(reg >> 8), (uint8_t)(reg & 0xFF), data};
+  return this->write(buf, 3, true);
 }
 
 bool Tab5Camera::init_camera_() {
@@ -259,7 +574,7 @@ bool Tab5Camera::init_camera_() {
     ESP_LOGI(TAG, "Step 2.2: No reset pin configured, skipping reset");
   }
 
-  // Étape 3: Initialisation du capteur I2C
+  // Étape 3: Initialisation du capteur I2C (MODIFIÉE)
   ESP_LOGI(TAG, "Step 2.3: Initializing camera sensor");
   if (!this->init_sensor_()) {
     ESP_LOGE(TAG, "Failed to initialize camera sensor");
