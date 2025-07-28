@@ -36,15 +36,9 @@
 namespace esphome {
 namespace tab5_camera {
 	
-// Tab5 Camera sensor definitions - AJOUTÉ
-#define OV5645_SCCB_ADDR    0x3C  // Adresse I2C pour OV5645
-#define SC2336_SCCB_ADDR    0x30  // Adresse I2C pour SC2336
-#define SC2356_SCCB_ADDR    0x43  // Adresse I2C pour SC2356 (fallback)
-
-// Tab5 sensor IDs - AJOUTÉ
-#define OV5645_CHIP_ID      0x5645
-#define SC2336_CHIP_ID      0x2336
-#define SC2356_CHIP_ID      0x2356
+// Tab5 Camera sensor definitions - SC2356 uniquement
+#define SC2356_SCCB_ADDR    0x43  // Adresse I2C pour SC2356
+#define SC2356_CHIP_ID      0x2356  // ID du capteur SC2356
 
 // Constantes basées sur l'exemple IDF
 #define TAB5_RGB565_BITS_PER_PIXEL           16
@@ -85,7 +79,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   void dump_config() override;
   float get_setup_priority() const override;
 
-  // Configuration I2C (héritée de I2CDevice mais avec alias pour clarté)
+  // Configuration I2C
   void set_sensor_address(uint8_t address) { 
     this->sensor_address_ = address; 
     this->set_i2c_address(address); 
@@ -97,7 +91,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   void set_external_clock_frequency(uint32_t freq) { this->external_clock_frequency_ = freq; }
   void set_reset_pin(GPIOPin *pin) { this->reset_pin_ = pin; }
 
-  // Nouveaux paramètres de caméra
+  // Paramètres de caméra
   void set_resolution(uint16_t width, uint16_t height) { 
     this->frame_width_ = width; 
     this->frame_height_ = height; 
@@ -176,29 +170,23 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   // Debug et diagnostic
   void debug_camera_status();
   
-  // Configuration du capteur I2C
-  bool configure_sensor_();
+  // Configuration du capteur SC2356
+  bool configure_sc2356_();
   bool reset_sensor_();
   
-  // AJOUTÉ: Configuration spécifique pour chaque capteur
-  bool configure_ov5645_();
-  bool configure_sc2336_();
-  bool configure_sc2356_();
-  
-  // AJOUTÉ: Communication I2C avec registres 16-bit
+  // Communication I2C avec registres 16-bit
   bool read_byte_16(uint16_t reg, uint8_t *data);
   bool write_byte_16(uint16_t reg, uint8_t data);
   
-  // Communication I2C avec le capteur (existant mais renommé pour clarté)
+  // Communication I2C avec le capteur
   bool read_sensor_register_(uint16_t reg, uint8_t *value);
   bool write_sensor_register_(uint16_t reg, uint8_t value);
   
-  // AJOUTÉ: Détection automatique du capteur
-  uint16_t detect_sensor_id_();
-  bool test_sensor_communication_(uint8_t address);
+  // Détection SC2356
+  uint16_t detect_sc2356_sensor_();
+  bool test_sc2356_communication_();
   
   // Callbacks statiques pour le contrôleur de caméra
-  static bool IRAM_ATTR camera_get_new_vb_callback(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data);
   static bool IRAM_ATTR camera_get_finished_trans_callback(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data);
   
   // Tâche de streaming
@@ -217,7 +205,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   bool sensor_initialized_{false};
   bool ldo_initialized_{false};
   
-  // AJOUTÉ: Type de capteur détecté
+  // Type de capteur détecté (SC2356)
   uint16_t detected_sensor_id_{0};
   uint8_t detected_sensor_address_{0};
   
@@ -237,13 +225,13 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
 
  private:
   // Configuration générale
-  std::string name_{"Tab5 Camera"};
+  std::string name_{"Tab5 Camera SC2356"};
   uint8_t external_clock_pin_{0};
   uint32_t external_clock_frequency_{24000000};  // 24MHz par défaut
-  uint8_t sensor_address_{0x43};  // Adresse I2C par défaut du capteur SC2356 0X43
+  uint8_t sensor_address_{SC2356_SCCB_ADDR};  // Adresse I2C SC2356 (0x43)
   GPIOPin *reset_pin_{nullptr};
 
-  // Paramètres de caméra
+  // Paramètres de caméra SC2356
   uint16_t frame_width_{640};
   uint16_t frame_height_{480};
   std::string pixel_format_{"RGB565"};
