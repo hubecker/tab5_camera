@@ -17,7 +17,6 @@ static const char *const TAG = "tab5_camera";
 #define TAB5_STREAMING_STACK_SIZE 8192
 #define TAB5_FRAME_QUEUE_LENGTH 8
 
-
 // ID réels observés sur votre Tab5 SC2356
 #define SC2356_CHIP_ID_REG1    0x00
 #define SC2356_CHIP_ID_REG2    0x01
@@ -32,7 +31,6 @@ Tab5Camera::~Tab5Camera() {
   this->deinit_camera_();
 #endif
 }
-
 
 // Configuration spécifique pour SC2356
 struct SC2356Config {
@@ -93,34 +91,38 @@ static const SC2356Config sc2356_init_config[] = {
   // Start streaming
   {0x0100, 0x01, "Streaming start"},            // Exit standby
 };
+
 // Fonction pour écrire un registre 16-bit (SC2356 utilise des adresses 16-bit)
 bool Tab5Camera::write_register_16(uint16_t reg, uint8_t val) {
-  uint8_t data[3] = {
-    static_cast<uint8_t>(reg >> 8),    // MSB de l'adresse
-    static_cast<uint8_t>(reg & 0xFF),  // LSB de l'adresse  
-    val                                // Valeur
-  };
+  uint8_t reg_high = static_cast<uint8_t>(reg >> 8);
+  uint8_t reg_low = static_cast<uint8_t>(reg & 0xFF);
   
-  if (!this->write_bytes_raw(data, 3)) {
-    ESP_LOGD(TAG, "Failed to write register 0x%04X = 0x%02X", reg, val);
+  // Écrire l'adresse du registre (16-bit)
+  if (!this->write_byte(reg_high, reg_low)) {
+    ESP_LOGD(TAG, "Failed to write register address 0x%04X", reg);
     return false;
   }
+  
+  // Écrire la valeur
+  if (!this->write_byte_16(reg, val)) {
+    ESP_LOGD(TAG, "Failed to write register value 0x%04X = 0x%02X", reg, val);
+    return false;
+  }
+  
   return true;
 }
 
 // Fonction pour lire un registre 16-bit
 bool Tab5Camera::read_register_16(uint16_t reg, uint8_t *val) {
-  uint8_t reg_addr[2] = {
-    static_cast<uint8_t>(reg >> 8),
-    static_cast<uint8_t>(reg & 0xFF)
-  };
-  
-  if (!this->write_bytes_raw(reg_addr, 2)) {
+  // Pour les registres 16-bit, on utilise d'abord write_byte_16 puis read_byte
+  if (!this->read_byte_16(reg, val)) {
+    ESP_LOGD(TAG, "Failed to read register 0x%04X", reg);
     return false;
   }
   
-  return this->read_bytes_raw(val, 1);
+  return true;
 }
+
 void Tab5Camera::setup() {
 #ifdef HAS_ESP32_P4_CAMERA
   ESP_LOGCONFIG(TAG, "Setting up Tab5 Camera with ESP32-P4 MIPI-CSI...");
@@ -238,8 +240,6 @@ bool Tab5Camera::init_ldo_() {
   return true;  // Retourner true même si le LDO échoue
 }
 
-// REMPLACEZ votre fonction init_sensor_() par cette version propre :
-
 bool Tab5Camera::init_sensor_() {
   if (this->sensor_initialized_) {
     ESP_LOGI(TAG, "Sensor already initialized, skipping");
@@ -250,7 +250,7 @@ bool Tab5Camera::init_sensor_() {
   
   // Test de communication I2C basique d'abord
   uint8_t test_data;
-  bool sensor_detected = false;  // ← Variable déclarée ici
+  bool sensor_detected = false;
   
   // Test de plusieurs registres communs pour détecter le capteur
   const uint8_t test_regs[] = {0x00, 0x01, 0x02, 0x0A, 0x0B, 0x0C, 0x0D};
@@ -397,34 +397,6 @@ bool Tab5Camera::init_sensor_() {
   return true;
 }
 
-// Fonction pour écrire un registre 16-bit (à ajouter après init_sensor_)
-bool Tab5Camera::write_register_16(uint16_t reg, uint8_t val) {
-  uint8_t data[3] = {
-    static_cast<uint8_t>(reg >> 8),    // MSB de l'adresse
-    static_cast<uint8_t>(reg & 0xFF),  // LSB de l'adresse  
-    val                                // Valeur
-  };
-  
-  if (!this->write_bytes_raw(data, 3)) {
-    ESP_LOGD(TAG, "Failed to write register 0x%04X = 0x%02X", reg, val);
-    return false;
-  }
-  return true;
-}
-
-// Fonction pour lire un registre 16-bit
-bool Tab5Camera::read_register_16(uint16_t reg, uint8_t *val) {
-  uint8_t reg_addr[2] = {
-    static_cast<uint8_t>(reg >> 8),
-    static_cast<uint8_t>(reg & 0xFF)
-  };
-  
-  if (!this->write_bytes_raw(reg_addr, 2)) {
-    return false;
-  }
-  
-  return this->read_bytes_raw(val, 1);
-}
 bool Tab5Camera::init_camera_() {
   if (this->camera_initialized_) {
     ESP_LOGI(TAG, "Camera already initialized, skipping");
