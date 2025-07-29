@@ -92,34 +92,52 @@ static const SC2356Config sc2356_init_config[] = {
   {0x0100, 0x01, "Streaming start"},            // Exit standby
 };
 
-// Fonction pour écrire un registre 16-bit (SC2356 utilise des adresses 16-bit)
+// FIXED: Fonction pour écrire un registre 8-bit (SC2356 utilise des adresses 8-bit pour les registres basiques)
+bool Tab5Camera::write_register_8(uint8_t reg, uint8_t val) {
+  if (!this->write_byte(reg, val)) {
+    ESP_LOGD(TAG, "Failed to write register 0x%02X = 0x%02X", reg, val);
+    return false;
+  }
+  return true;
+}
+
+// FIXED: Fonction pour lire un registre 8-bit
+bool Tab5Camera::read_register_8(uint8_t reg, uint8_t *val) {
+  if (!this->read_byte(reg, val)) {
+    ESP_LOGD(TAG, "Failed to read register 0x%02X", reg);
+    return false;
+  }
+  return true;
+}
+
+// FIXED: Fonction pour écrire un registre 16-bit (pour les registres avancés)
 bool Tab5Camera::write_register_16(uint16_t reg, uint8_t val) {
+  // Pour les registres 16-bit, on écrit d'abord l'adresse puis la valeur
   uint8_t reg_high = static_cast<uint8_t>(reg >> 8);
   uint8_t reg_low = static_cast<uint8_t>(reg & 0xFF);
   
-  // Écrire l'adresse du registre (16-bit)
-  if (!this->write_byte(reg_high, reg_low)) {
-    ESP_LOGD(TAG, "Failed to write register address 0x%04X", reg);
-    return false;
-  }
-  
-  // Écrire la valeur
-  if (!this->write_byte_16(reg, val)) {
-    ESP_LOGD(TAG, "Failed to write register value 0x%04X = 0x%02X", reg, val);
+  // Approche alternative: utiliser write_bytes avec buffer
+  uint8_t buffer[3] = {reg_high, reg_low, val};
+  if (!this->write_bytes_raw(buffer, 3)) {
+    ESP_LOGD(TAG, "Failed to write 16-bit register 0x%04X = 0x%02X", reg, val);
     return false;
   }
   
   return true;
 }
 
-// Fonction pour lire un registre 16-bit
+// FIXED: Fonction pour lire un registre 16-bit avec correction de type
 bool Tab5Camera::read_register_16(uint16_t reg, uint8_t *val) {
-  // Pour les registres 16-bit, on utilise d'abord write_byte_16 puis read_byte
-  if (!this->read_byte_16(reg, val)) {
+  // CORRECTION: ESPHome read_byte_16 attend un uint16_t*, pas uint8_t*
+  uint16_t temp_val;
+  
+  if (!this->read_byte_16(static_cast<uint8_t>(reg), &temp_val)) {
     ESP_LOGD(TAG, "Failed to read register 0x%04X", reg);
     return false;
   }
   
+  // Convertir uint16_t vers uint8_t (prendre seulement les 8 bits bas)
+  *val = static_cast<uint8_t>(temp_val & 0xFF);
   return true;
 }
 
@@ -255,7 +273,7 @@ bool Tab5Camera::init_sensor_() {
   // Test de plusieurs registres communs pour détecter le capteur
   const uint8_t test_regs[] = {0x00, 0x01, 0x02, 0x0A, 0x0B, 0x0C, 0x0D};
   for (size_t i = 0; i < sizeof(test_regs); i++) {
-    if (this->read_byte(test_regs[i], &test_data)) {
+    if (this->read_register_8(test_regs[i], &test_data)) {
       ESP_LOGI(TAG, "Sensor responded: reg 0x%02X = 0x%02X", test_regs[i], test_data);
       sensor_detected = true;
     }
@@ -271,7 +289,7 @@ bool Tab5Camera::init_sensor_() {
   // Lecture de l'ID du capteur
   uint8_t chip_id_1, chip_id_2;
   
-  if (!this->read_byte(0x00, &chip_id_1) || !this->read_byte(0x01, &chip_id_2)) {
+  if (!this->read_register_8(0x00, &chip_id_1) || !this->read_register_8(0x01, &chip_id_2)) {
     ESP_LOGE(TAG, "❌ Cannot read sensor chip ID registers");
     return false;
   }
@@ -332,7 +350,7 @@ bool Tab5Camera::init_sensor_() {
       ESP_LOGD(TAG, "Setting %s: reg 0x%02X = 0x%02X", 
                sc2356_config[i].desc, sc2356_config[i].reg, sc2356_config[i].val);
       
-      if (!this->write_byte(sc2356_config[i].reg, sc2356_config[i].val)) {
+      if (!this->write_register_8(sc2356_config[i].reg, sc2356_config[i].val)) {
         if (sc2356_config[i].critical) {
           ESP_LOGE(TAG, "❌ Critical register write failed: 0x%02X", sc2356_config[i].reg);
           config_success = false;
@@ -353,7 +371,7 @@ bool Tab5Camera::init_sensor_() {
     
     // Vérification finale
     uint8_t verify_reg;
-    if (this->read_byte(0x00, &verify_reg)) {
+    if (this->read_register_8(0x00, &verify_reg)) {
       ESP_LOGI(TAG, "✅ SC2356 configuration completed - sensor status: 0x%02X", verify_reg);
     }
     
@@ -375,7 +393,7 @@ bool Tab5Camera::init_sensor_() {
       ESP_LOGD(TAG, "Setting %s: reg 0x%02X = 0x%02X", 
                basic_config[i].desc, basic_config[i].reg, basic_config[i].val);
       
-      if (!this->write_byte(basic_config[i].reg, basic_config[i].val)) {
+      if (!this->write_register_8(basic_config[i].reg, basic_config[i].val)) {
         ESP_LOGW(TAG, "Failed to write register 0x%02X", basic_config[i].reg);
       }
       vTaskDelay(10 / portTICK_PERIOD_MS);
@@ -384,7 +402,7 @@ bool Tab5Camera::init_sensor_() {
   
   // Test final de communication
   uint8_t final_test;
-  if (this->read_byte(0x00, &final_test)) {
+  if (this->read_register_8(0x00, &final_test)) {
     ESP_LOGI(TAG, "✅ Sensor communication test passed (reg 0x00 = 0x%02X)", final_test);
   } else {
     ESP_LOGE(TAG, "❌ Final sensor communication test failed");
@@ -471,7 +489,7 @@ bool Tab5Camera::init_camera_() {
   csi_config.output_data_color_type = CAM_CTLR_COLOR_RGB565;
   csi_config.data_lane_num = 2;
   csi_config.byte_swap_en = false;
-  csi_config.queue_items = 4;  // ← AUGMENTÉ: plus de buffers dans la queue
+  csi_config.queue_items = 4;  // Plus de buffers dans la queue
 
   esp_err_t ret = esp_cam_new_csi_ctlr(&csi_config, &this->cam_handle_);
   if (ret != ESP_OK) {
@@ -480,10 +498,10 @@ bool Tab5Camera::init_camera_() {
   }
   ESP_LOGI(TAG, "CSI controller created successfully");
   
-  // Étape 6: Configuration des callbacks - CORRECTION CRITIQUE
+  // Étape 6: Configuration des callbacks
   ESP_LOGI(TAG, "Step 2.6: Registering camera callbacks");
   esp_cam_ctlr_evt_cbs_t cbs = {
-    .on_get_new_trans = nullptr,  // ← IMPORTANT: laisser à nullptr pour utiliser la queue interne !
+    .on_get_new_trans = nullptr,  // IMPORTANT: laisser à nullptr pour utiliser la queue interne !
     .on_trans_finished = Tab5Camera::camera_get_finished_trans_callback,
   };
   
