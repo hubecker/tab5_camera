@@ -17,6 +17,13 @@ static const char *const TAG = "tab5_camera";
 #define TAB5_STREAMING_STACK_SIZE 8192
 #define TAB5_FRAME_QUEUE_LENGTH 8
 
+
+// ID réels observés sur votre Tab5 SC2356
+#define SC2356_CHIP_ID_REG1    0x00
+#define SC2356_CHIP_ID_REG2    0x01
+#define SC2356_CHIP_ID_VAL1    0x00   // Valeur réelle de votre capteur
+#define SC2356_CHIP_ID_VAL2    0xA2   // Valeur réelle de votre capteur (était 0xA0 dans un log)
+
 namespace esphome {
 namespace tab5_camera {
 
@@ -26,6 +33,94 @@ Tab5Camera::~Tab5Camera() {
 #endif
 }
 
+
+// Configuration spécifique pour SC2356
+struct SC2356Config {
+  uint16_t reg;
+  uint8_t val;
+  const char* desc;
+};
+
+// Configuration initiale pour SC2356 2MP
+static const SC2356Config sc2356_init_config[] = {
+  // Software Reset et System Control
+  {0x0100, 0x00, "Software standby"},           // Standby mode
+  {0x36e9, 0x80, "System reset"},               // Reset
+  {0x37f9, 0x80, "System reset 2"},
+  
+  // PLL Configuration pour 24MHz input clock
+  {0x320e, 0x04, "VTS MSB"},                    // Vertical Total Size
+  {0x320f, 0x65, "VTS LSB"},                    // 1125 lines
+  {0x320c, 0x08, "HTS MSB"},                    // Horizontal Total Size  
+  {0x320d, 0x98, "HTS LSB"},                    // 2200 pixels
+  
+  // Image Size Configuration (1920x1080)
+  {0x3208, 0x07, "Width MSB"},                  // 1920 width
+  {0x3209, 0x80, "Width LSB"},
+  {0x320a, 0x04, "Height MSB"},                 // 1080 height
+  {0x320b, 0x38, "Height LSB"},
+  
+  // Cropping configuration
+  {0x3210, 0x00, "X start MSB"},
+  {0x3211, 0x04, "X start LSB"},
+  {0x3212, 0x00, "Y start MSB"},
+  {0x3213, 0x04, "Y start LSB"},
+  
+  // MIPI Configuration
+  {0x3301, 0x06, "MIPI lane number"},           // 2 lanes
+  {0x3302, 0x10, "MIPI bit rate control"},
+  {0x3303, 0x20, "MIPI timing"},
+  {0x3304, 0x20, "MIPI timing 2"},
+  
+  // Output Format - RAW8 pour MIPI-CSI
+  {0x3016, 0x12, "Output format"},              // RAW8 output
+  {0x3017, 0x00, "Output control"},
+  
+  // Exposure et Gain par défaut
+  {0x3e00, 0x00, "Exposure MSB"},               // Exposure time
+  {0x3e01, 0x8c, "Exposure Mid"},
+  {0x3e02, 0x20, "Exposure LSB"},
+  {0x3e06, 0x00, "Gain control"},               // Analog gain
+  {0x3e07, 0x80, "Gain value"},
+  
+  // Black Level
+  {0x3900, 0x11, "BLC control"},
+  {0x3901, 0x05, "BLC target"},
+  
+  // Mirror et Flip
+  {0x3221, 0x00, "Mirror/Flip control"},        // Normal orientation
+  
+  // Start streaming
+  {0x0100, 0x01, "Streaming start"},            // Exit standby
+};
+// Fonction pour écrire un registre 16-bit (SC2356 utilise des adresses 16-bit)
+bool Tab5Camera::write_register_16(uint16_t reg, uint8_t val) {
+  uint8_t data[3] = {
+    static_cast<uint8_t>(reg >> 8),    // MSB de l'adresse
+    static_cast<uint8_t>(reg & 0xFF),  // LSB de l'adresse  
+    val                                // Valeur
+  };
+  
+  if (!this->write_bytes_raw(data, 3)) {
+    ESP_LOGD(TAG, "Failed to write register 0x%04X = 0x%02X", reg, val);
+    return false;
+  }
+  return true;
+}
+
+// Fonction pour lire un registre 16-bit
+bool Tab5Camera::read_register_16(uint16_t reg, uint8_t *val) {
+  uint8_t reg_addr[2] = {
+    static_cast<uint8_t>(reg >> 8),
+    static_cast<uint8_t>(reg & 0xFF)
+  };
+  
+  if (!this->write_bytes_raw(reg_addr, 2)) {
+    return false;
+  }
+  
+  return this->read_bytes_raw(val, 1);
+}
 void Tab5Camera::setup() {
 #ifdef HAS_ESP32_P4_CAMERA
   ESP_LOGCONFIG(TAG, "Setting up Tab5 Camera with ESP32-P4 MIPI-CSI...");
@@ -149,18 +244,82 @@ bool Tab5Camera::init_sensor_() {
     return true;
   }
   
-  ESP_LOGI(TAG, "Attempting to initialize camera sensor at I2C address 0x%02X", this->address_);
+  ESP_LOGI(TAG, "Attempting to initialize SC2356 camera sensor at I2C address 0x%02X", this->address_);
   
-  // Test de communication I2C approfondi
+  // Test de communication I2C basique d'abord
   uint8_t test_data;
-  bool sensor_detected = false;
+  if (!this->read_byte(0x00, &test_data)) {
+    ESP_LOGE(TAG, "❌ No I2C response at address 0x%02X - check wiring!", this->address_);
+    return false;
+  }
   
-  // Test de plusieurs registres communs (8-bit seulement)
-  const uint8_t test_regs[] = {0x00, 0x01, 0x02, 0x0A, 0x0B, 0x0C, 0x0D};
-  for (size_t i = 0; i < sizeof(test_regs); i++) {
-    if (this->read_byte(test_regs[i], &test_data)) {
-      ESP_LOGI(TAG, "Sensor responded: reg 0x%02X = 0x%02X", test_regs[i], test_data);
-      sensor_detected = true;
+  ESP_LOGI(TAG, "✅ I2C communication OK at address 0x%02X", this->address_);
+  
+  // Lecture de l'ID du capteur (utiliser les registres 8-bit qui fonctionnent)
+  uint8_t chip_id_1, chip_id_2;
+  
+  if (!this->read_byte(0x00, &chip_id_1) || !this->read_byte(0x01, &chip_id_2)) {
+    ESP_LOGE(TAG, "❌ Cannot read sensor chip ID registers");
+    return false;
+  }
+  
+  ESP_LOGI(TAG, "🔍 Sensor ID detected: 0x%02X%02X (reg 0x00=0x%02X, reg 0x01=0x%02X)", 
+           chip_id_1, chip_id_2, chip_id_1, chip_id_2);
+  
+  // Vérification de l'ID SC2356 avec les valeurs réelles observées
+  if (chip_id_1 == SC2356_CHIP_ID_VAL1 && (chip_id_2 == 0xA0 || chip_id_2 == 0xA2)) {
+    ESP_LOGI(TAG, "🎯 SC2356 sensor confirmed! ID: 0x%02X%02X", chip_id_1, chip_id_2);
+    
+    // Configuration complète pour SC2356
+    ESP_LOGI(TAG, "🔧 Configuring SC2356 with full register set...");
+    
+    for (size_t i = 0; i < sizeof(sc2356_init_config) / sizeof(sc2356_init_config[0]); i++) {
+      ESP_LOGD(TAG, "Setting %s: reg 0x%04X = 0x%02X", 
+               sc2356_init_config[i].desc, 
+               sc2356_init_config[i].reg, 
+               sc2356_init_config[i].val);
+      
+      if (!this->write_register_16(sc2356_init_config[i].reg, sc2356_init_config[i].val)) {
+        ESP_LOGW(TAG, "Failed to write SC2356 register 0x%04X - continuing", sc2356_init_config[i].reg);
+      }
+      
+      // Délai entre les écritures pour laisser le temps au capteur
+      vTaskDelay(5 / portTICK_PERIOD_MS);
+    }
+    
+    // Vérification que le capteur est toujours responsive
+    uint8_t verify_reg;
+    if (this->read_register_16(0x0100, &verify_reg)) {
+      ESP_LOGI(TAG, "✅ SC2356 configuration completed - streaming status: 0x%02X", verify_reg);
+      if (verify_reg & 0x01) {
+        ESP_LOGI(TAG, "📸 SC2356 is now in streaming mode");
+      }
+    }
+    
+  } else {
+    ESP_LOGW(TAG, "⚠️ Chip ID mismatch - Expected: 0x%02X%02X, Got: 0x%02X%02X", 
+             SC2356_CHIP_ID_VAL1, SC2356_CHIP_ID_VAL2, chip_id_1, chip_id_2);
+    ESP_LOGW(TAG, "Continuing with generic configuration...");
+    
+    // Configuration générique basique comme avant
+    const struct {
+      uint8_t reg;
+      uint8_t val;
+      const char* desc;
+    } basic_config[] = {
+      {0x09, 0x00, "System control"},
+      {0x15, 0x00, "Output format"},
+      {0x3A, 0x04, "TSLB register"},
+    };
+    
+    for (size_t i = 0; i < sizeof(basic_config) / sizeof(basic_config[0]); i++) {
+      ESP_LOGD(TAG, "Setting %s: reg 0x%02X = 0x%02X", 
+               basic_config[i].desc, basic_config[i].reg, basic_config[i].val);
+      
+      if (!this->write_byte(basic_config[i].reg, basic_config[i].val)) {
+        ESP_LOGW(TAG, "Failed to write register 0x%02X", basic_config[i].reg);
+      }
+      vTaskDelay(10 / portTICK_PERIOD_MS);
     }
   }
   
