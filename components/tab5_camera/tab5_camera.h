@@ -93,7 +93,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   const std::string &get_pixel_format() const { return this->pixel_format_; }
   uint8_t get_jpeg_quality() const { return this->jpeg_quality_; }
   uint8_t get_framerate() const { return this->framerate_; }
-  uint8_t get_sensor_address() const { return this->sensor_address_; }
+  //uint8_t get_sensor_address() const { return this->sensor_address_; }
 
   // Fonctions de capture
   bool take_snapshot();
@@ -199,7 +199,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   std::string name_{"Tab5 Camera"};
   uint8_t external_clock_pin_{0};
   uint32_t external_clock_frequency_{24000000};  // 24MHz par défaut
-  uint8_t sensor_address_{0x50};  // Adresse I2C par défaut du capteur SC2356
+  //uint8_t sensor_address_{0x43};  // Adresse I2C par défaut du capteur SC2356
   GPIOPin *reset_pin_{nullptr};
 
   // Paramètres de caméra
