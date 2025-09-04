@@ -7,7 +7,8 @@ from esphome.const import (
     CONF_ADDRESS,
     CONF_FREQUENCY,
 )
-from esphome import pins
+from esphome import pins, automation
+from esphome.core import CORE
 
 CODEOWNERS = ["@youkorr"]
 DEPENDENCIES = ["i2c"]
@@ -24,6 +25,7 @@ CONF_FRAMERATE = "framerate"
 CONF_EXTERNAL_CLOCK_PIN = "external_clock_pin"
 CONF_RESET_PIN = "reset_pin"
 CONF_SENSOR_ADDRESS = "sensor_address"
+CONF_ON_FRAME = "on_frame"
 
 # Résolutions supportées
 CAMERA_RESOLUTIONS = {
@@ -48,6 +50,11 @@ def validate_resolution(value):
         return value
     return cv.invalid("Resolution must be one of: {}".format(", ".join(CAMERA_RESOLUTIONS.keys())))
 
+# Actions et triggers pour les frames
+OnFrameTrigger = tab5_camera_ns.class_(
+    "OnFrameTrigger", automation.Trigger.template(cg.uint8.operator("ptr"), cg.size_t)
+)
+
 CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
@@ -59,9 +66,15 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_SENSOR_ADDRESS, default=0x36): cv.i2c_address,
             # Nouveaux paramètres
             cv.Optional(CONF_RESOLUTION, default="VGA"): validate_resolution,
-            cv.Optional(CONF_PIXEL_FORMAT, default="YUV422"): cv.one_of(*PIXEL_FORMATS.keys(), upper=True),
+            cv.Optional(CONF_PIXEL_FORMAT, default="RGB565"): cv.one_of(*PIXEL_FORMATS.keys(), upper=True),
             cv.Optional(CONF_JPEG_QUALITY, default=10): cv.int_range(min=1, max=63),
             cv.Optional(CONF_FRAMERATE, default=15): cv.int_range(min=1, max=60),
+            # Callback pour les frames reçues
+            cv.Optional(CONF_ON_FRAME): automation.validate_automation(
+                {
+                    cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(OnFrameTrigger),
+                }
+            ),
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
@@ -69,8 +82,6 @@ CONFIG_SCHEMA = cv.All(
 )
 
 async def to_code(config):
-
-    
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await i2c.register_i2c_device(var, config)
@@ -101,6 +112,45 @@ async def to_code(config):
         reset_pin = await cg.gpio_pin_expression(config[CONF_RESET_PIN])
         cg.add(var.set_reset_pin(reset_pin))
 
+    # Configuration des callbacks on_frame
+    if CONF_ON_FRAME in config:
+        for conf in config[CONF_ON_FRAME]:
+            trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID])
+            cg.add(var.add_on_frame_trigger(trigger))
+            await automation.build_automation(
+                trigger, [(cg.uint8.operator("ptr"), "data"), (cg.size_t, "data_len")], conf
+            )
+
+# Actions pour contrôler la caméra
+@automation.register_action(
+    "tab5_camera.take_snapshot",
+    cg.Pvariable, 
+    cv.Schema({cv.GenerateID(): cv.use_id(Tab5Camera)})
+)
+async def tab5_camera_take_snapshot_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    return var
+
+@automation.register_action(
+    "tab5_camera.start_streaming",
+    cg.Pvariable,
+    cv.Schema({cv.GenerateID(): cv.use_id(Tab5Camera)})
+)
+async def tab5_camera_start_streaming_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    return var
+
+@automation.register_action(
+    "tab5_camera.stop_streaming", 
+    cg.Pvariable,
+    cv.Schema({cv.GenerateID(): cv.use_id(Tab5Camera)})
+)
+async def tab5_camera_stop_streaming_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    return var
 
 
 
