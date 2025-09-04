@@ -3,6 +3,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/gpio.h"
 #include "esphome/core/preferences.h"
+#include "esphome/core/automation.h"
 #include "esphome/components/i2c/i2c.h"
 
 #ifdef USE_ESP32
@@ -22,7 +23,6 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "freertos/queue.h"
-//#include "esp_cam_sensor.h"
 
 // Vérification des versions IDF
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 1, 0)
@@ -36,6 +36,18 @@
 
 namespace esphome {
 namespace tab5_camera {
+
+// Forward declarations
+class Tab5Camera;
+
+// Trigger pour les callbacks de frames
+class OnFrameTrigger : public Trigger<uint8_t *, size_t> {
+ public:
+  explicit OnFrameTrigger(Tab5Camera *parent) : parent_(parent) {}
+
+ protected:
+  Tab5Camera *parent_;
+};
 
 // Énumérations pour les formats et résolutions
 enum class PixelFormat {
@@ -103,6 +115,16 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   bool start_streaming();
   bool stop_streaming();
 
+  // État et diagnostics
+  bool is_ready() const;
+  bool has_error() const { return this->error_state_; }
+  const std::string &get_last_error() const { return this->last_error_; }
+
+  // Triggers pour l'automation ESPHome
+  void add_on_frame_trigger(OnFrameTrigger *trigger) { 
+    this->on_frame_triggers_.push_back(trigger); 
+  }
+
 #ifdef HAS_ESP32_P4_CAMERA
   bool is_streaming() const { return this->streaming_active_; }
   uint8_t* get_frame_buffer() const { return static_cast<uint8_t*>(this->frame_buffer_); }
@@ -128,10 +150,6 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
     this->on_frame_callbacks_.add(std::move(callback));
   }
 
-  // Gestion des erreurs
-  bool has_error() const { return this->error_state_; }
-  const std::string &get_last_error() const { return this->last_error_; }
-
  protected:
 #ifdef HAS_ESP32_P4_CAMERA
   // Structure pour les frames en queue
@@ -148,16 +166,18 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   bool init_ldo_();
   void deinit_camera_();
 
+  // Séquence de reset améliorée
+  bool reset_sensor_();
   bool setup_external_clock_();
 
+  // Configuration spécifique SC2356
+  bool configure_sc2356_();
+  bool configure_sc2356_mipi_output_();
+  
   // Debug et diagnostic
   void debug_camera_status();
   
-  // Configuration du capteur I2C
-  bool configure_sensor_();
-  bool reset_sensor_();
-  
-  // Communication I2C avec le capteur (AJOUTÉ pour corriger les erreurs de lien)
+  // Communication I2C avec le capteur
   bool read_sensor_register_(uint16_t reg, uint8_t *value);
   bool write_sensor_register_(uint16_t reg, uint8_t value);
   
@@ -168,6 +188,10 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   // Tâche de streaming
   static void streaming_task(void *parameter);
   void streaming_loop_();
+  
+  // Traitement des frames reçues
+  void process_frame_(uint8_t* data, size_t len);
+  void trigger_on_frame_callbacks_(uint8_t* data, size_t len);
   
   // Handles ESP32-P4 spécifiques
   esp_cam_ctlr_handle_t cam_handle_{nullptr};
@@ -210,7 +234,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   uint8_t jpeg_quality_{10};
   uint8_t framerate_{15};
 
-    // Méthodes pour registres 16-bit (SC2356)
+  // Méthodes pour registres 16-bit (SC2356)
   bool write_register_16(uint16_t reg, uint8_t val);
   bool read_register_16(uint16_t reg, uint8_t *val);
 
@@ -218,21 +242,26 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   bool error_state_{false};
   std::string last_error_{""};
   
-  // Callbacks
+  // Callbacks et triggers
   CallbackManager<void(uint8_t*, size_t)> on_frame_callbacks_;
+  std::vector<OnFrameTrigger *> on_frame_triggers_;
   
   // Méthodes utilitaires privées
   void set_error_(const std::string &error);
   void clear_error_();
   PixelFormat parse_pixel_format_(const std::string &format);
   size_t calculate_frame_size_() const;
+  
+  // Statistiques pour diagnostics
+  uint32_t frame_count_{0};
+  uint32_t error_count_{0};
+  uint32_t last_frame_timestamp_{0};
 };
 
 }  // namespace tab5_camera
 }  // namespace esphome
 
 #endif  // USE_ESP32
-
 
 
 
