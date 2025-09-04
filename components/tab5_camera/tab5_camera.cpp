@@ -3,12 +3,6 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/hal.h"
 #include "esp_timer.h"
-#include "esp_cam_ctlr_csi.h"
-//#include "sdkconfig.h"
-//#include "esp_cam_sensor.h"
-#include "driver/jpeg_encode.h"
-//#include "esp_video_buffer.h"
-//#include "esp_video_internal.h"
 
 #ifdef USE_ESP32
 
@@ -22,11 +16,11 @@ static const char *const TAG = "tab5_camera";
 #define TAB5_STREAMING_STACK_SIZE 8192
 #define TAB5_FRAME_QUEUE_LENGTH 8
 
-// ID réels observés sur votre Tab5 SC2356
+// Configuration spécifique SC2356
 #define SC2356_CHIP_ID_REG1    0x00
 #define SC2356_CHIP_ID_REG2    0x01
-#define SC2356_CHIP_ID_VAL1    0x00   // Valeur réelle de votre capteur
-#define SC2356_CHIP_ID_VAL2    0xA2   // Valeur réelle de votre capteur (était 0xA0 dans un log)
+#define SC2356_CHIP_ID_VAL1    0x00
+#define SC2356_CHIP_ID_VAL2    0xA2
 
 namespace esphome {
 namespace tab5_camera {
@@ -60,12 +54,6 @@ void Tab5Camera::setup() {
   }
   ESP_LOGI(TAG, "Frame queue created successfully");
   
-  // Configuration du pin de l'horloge externe
-  if (this->external_clock_pin_ > 0) {
-    ESP_LOGD(TAG, "Configuring external clock on GPIO%u at %u Hz", 
-             this->external_clock_pin_, this->external_clock_frequency_);
-  }
-  
   ESP_LOGI(TAG, "Step 2: Initializing camera");
   
   if (!this->init_camera_()) {
@@ -84,36 +72,22 @@ void Tab5Camera::setup() {
 void Tab5Camera::dump_config() {
   ESP_LOGCONFIG(TAG, "Tab5 Camera '%s':", this->name_.c_str());
   
-  // Debug des macros disponibles
-  ESP_LOGCONFIG(TAG, "  Platform Debug:");
-#ifdef USE_ESP32
-  ESP_LOGCONFIG(TAG, "    USE_ESP32: YES");
-#else
-  ESP_LOGCONFIG(TAG, "    USE_ESP32: NO");
-#endif
-
-#ifdef CONFIG_IDF_TARGET_ESP32P4
-  ESP_LOGCONFIG(TAG, "    CONFIG_IDF_TARGET_ESP32P4: YES");
-#else
-  ESP_LOGCONFIG(TAG, "    CONFIG_IDF_TARGET_ESP32P4: NO");
-#endif
-
 #ifdef HAS_ESP32_P4_CAMERA
-  ESP_LOGCONFIG(TAG, "    HAS_ESP32_P4_CAMERA: YES");
+  ESP_LOGCONFIG(TAG, "  Platform: ESP32-P4 MIPI-CSI");
   ESP_LOGCONFIG(TAG, "  Resolution: %dx%d", TAB5_CAMERA_H_RES, TAB5_CAMERA_V_RES);
+  ESP_LOGCONFIG(TAG, "  Pixel Format: %s", this->pixel_format_.c_str());
+  ESP_LOGCONFIG(TAG, "  Framerate: %d fps", this->framerate_);
   if (this->external_clock_pin_ > 0) {
     ESP_LOGCONFIG(TAG, "  External Clock Pin: GPIO%u", this->external_clock_pin_);
     ESP_LOGCONFIG(TAG, "  External Clock Frequency: %u Hz", this->external_clock_frequency_);
   }
   ESP_LOGCONFIG(TAG, "  Frame Buffer Size: %zu bytes", this->frame_buffer_size_);
-  ESP_LOGCONFIG(TAG, "  Streaming Support: Available");
   ESP_LOGCONFIG(TAG, "  I2C Address: 0x%02X", this->address_);
   
   if (this->reset_pin_) {
     LOG_PIN("  Reset Pin: ", this->reset_pin_);
   }
 #else
-  ESP_LOGCONFIG(TAG, "    HAS_ESP32_P4_CAMERA: NO");
   ESP_LOGCONFIG(TAG, "  Status: ESP32-P4 MIPI-CSI API not available");
 #endif
   
@@ -126,7 +100,235 @@ float Tab5Camera::get_setup_priority() const {
   return setup_priority::HARDWARE - 1.0f;
 }
 
+bool Tab5Camera::is_ready() const {
 #ifdef HAS_ESP32_P4_CAMERA
+  return this->camera_initialized_ && this->sensor_initialized_;
+#else
+  return false;
+#endif
+}
+
+#ifdef HAS_ESP32_P4_CAMERA
+
+bool Tab5Camera::reset_sensor_() {
+  if (!this->reset_pin_) {
+    ESP_LOGW(TAG, "No reset pin configured - trying software reset");
+    
+    // Tentative de reset logiciel via I2C
+    if (!this->write_byte(0x12, 0x80)) {
+      ESP_LOGW(TAG, "Software reset failed");
+      return false;
+    }
+    
+    ESP_LOGI(TAG, "Software reset sent, waiting 100ms...");
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+    
+    return true;
+  }
+  
+  ESP_LOGI(TAG, "Executing hardware reset sequence");
+  
+  // Séquence de reset hardware optimisée pour SC2356
+  this->reset_pin_->setup();
+  
+  // 1. Reset actif (LOW) - maintenir 20ms minimum
+  this->reset_pin_->digital_write(false);
+  ESP_LOGD(TAG, "Reset pin LOW");
+  vTaskDelay(20 / portTICK_PERIOD_MS);
+  
+  // 2. Relâcher le reset (HIGH)
+  this->reset_pin_->digital_write(true);
+  ESP_LOGD(TAG, "Reset pin HIGH");
+  
+  // 3. Attendre la stabilisation du capteur
+  vTaskDelay(50 / portTICK_PERIOD_MS);
+  
+  ESP_LOGI(TAG, "Hardware reset sequence completed");
+  
+  // 4. Test de communication après reset
+  uint8_t test_val;
+  int retry_count = 0;
+  const int max_retries = 10;
+  
+  while (retry_count < max_retries) {
+    if (this->read_byte(0x00, &test_val)) {
+      ESP_LOGI(TAG, "Sensor communication restored after reset (reg 0x00 = 0x%02X)", test_val);
+      return true;
+    }
+    
+    retry_count++;
+    ESP_LOGD(TAG, "Communication test %d/%d failed, retrying...", retry_count, max_retries);
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+  }
+  
+  ESP_LOGE(TAG, "Sensor communication failed after reset");
+  return false;
+}
+
+bool Tab5Camera::configure_sc2356_() {
+  ESP_LOGI(TAG, "=== SC2356 POWER-UP AND MIPI CONFIGURATION ===");
+
+  // 1. Reset complet du capteur
+  ESP_LOGI(TAG, "Step 1: Complete sensor reset");
+  if (!this->write_byte(0x12, 0x80)) {
+    ESP_LOGE(TAG, "Failed to send software reset");
+    return false;
+  }
+  vTaskDelay(100 / portTICK_PERIOD_MS);
+
+  // 2. Configuration minimale pour démarrer la sortie MIPI
+  ESP_LOGI(TAG, "Step 2: Basic system configuration");
+  const struct {
+    uint8_t reg;
+    uint8_t val;
+    const char* desc;
+    bool critical;
+  } basic_config[] = {
+    {0x12, 0x00, "Exit reset mode", true},
+    {0x09, 0x00, "System control - normal mode", true},
+    {0x11, 0x00, "Clock divider - no division", false},
+    {0x6B, 0x10, "PLL control", false},
+    {0x6C, 0x40, "PLL multiplier", false},
+  };
+
+  for (size_t i = 0; i < sizeof(basic_config) / sizeof(basic_config[0]); i++) {
+    ESP_LOGD(TAG, "Setting %s: 0x%02X = 0x%02X", 
+             basic_config[i].desc, basic_config[i].reg, basic_config[i].val);
+    
+    if (!this->write_byte(basic_config[i].reg, basic_config[i].val)) {
+      if (basic_config[i].critical) {
+        ESP_LOGE(TAG, "Failed to write critical register 0x%02X", basic_config[i].reg);
+        return false;
+      } else {
+        ESP_LOGW(TAG, "Failed to write non-critical register 0x%02X", basic_config[i].reg);
+      }
+    }
+    vTaskDelay(5 / portTICK_PERIOD_MS);
+  }
+
+  // 3. Configuration de la résolution et du windowing
+  ESP_LOGI(TAG, "Step 3: Resolution and windowing setup");
+  const struct {
+    uint8_t reg;
+    uint8_t val;
+    const char* desc;
+  } resolution_config[] = {
+    // Configuration des fenêtres pour VGA (640x480)
+    {0x17, 0x00, "HSTART MSB"},
+    {0x18, 0x00, "HSTART LSB"}, 
+    {0x19, 0x00, "HSIZE MSB"},
+    {0x1A, 0x50, "HSIZE LSB"},  // 640 pixels
+    {0x03, 0x00, "VSTART MSB"},
+    {0x32, 0x00, "VSTART LSB"},
+    {0x20, 0x00, "VSIZE MSB"}, 
+    {0x21, 0x3C, "VSIZE LSB"},  // 480 pixels
+    
+    // Configuration du timing
+    {0x22, 0x00, "Timing control 1"},
+    {0x23, 0x00, "Timing control 2"},
+  };
+
+  for (size_t i = 0; i < sizeof(resolution_config) / sizeof(resolution_config[0]); i++) {
+    ESP_LOGD(TAG, "Setting %s: 0x%02X = 0x%02X", 
+             resolution_config[i].desc, resolution_config[i].reg, resolution_config[i].val);
+    
+    if (!this->write_byte(resolution_config[i].reg, resolution_config[i].val)) {
+      ESP_LOGW(TAG, "Failed to write resolution register 0x%02X", resolution_config[i].reg);
+    }
+    vTaskDelay(5 / portTICK_PERIOD_MS);
+  }
+
+  // 4. Configuration du format de sortie
+  ESP_LOGI(TAG, "Step 4: Output format configuration");
+  const struct {
+    uint8_t reg;
+    uint8_t val;
+    const char* desc;
+  } format_config[] = {
+    {0x15, 0x02, "Output format RGB565"},
+    {0x40, 0x10, "COM15 RGB565 full range"},
+    {0x41, 0x08, "COM16 color matrix"},
+    {0x42, 0x08, "COM17 DSP color bar"},
+  };
+
+  for (size_t i = 0; i < sizeof(format_config) / sizeof(format_config[0]); i++) {
+    ESP_LOGD(TAG, "Setting %s: 0x%02X = 0x%02X", 
+             format_config[i].desc, format_config[i].reg, format_config[i].val);
+    
+    if (!this->write_byte(format_config[i].reg, format_config[i].val)) {
+      ESP_LOGW(TAG, "Failed to write format register 0x%02X", format_config[i].reg);
+    }
+    vTaskDelay(5 / portTICK_PERIOD_MS);
+  }
+
+  return true;
+}
+
+bool Tab5Camera::configure_sc2356_mipi_output_() {
+  ESP_LOGI(TAG, "=== SC2356 MIPI OUTPUT CONFIGURATION ===");
+
+  // 1. Configuration MIPI spécifique
+  const struct {
+    uint8_t reg;
+    uint8_t val;
+    const char* desc;
+    bool critical;
+  } mipi_config[] = {
+    // Configuration MIPI de base
+    {0x4F, 0x04, "MIPI enable", true},
+    {0x50, 0x02, "MIPI 2 data lanes", true},
+    {0x51, 0x00, "MIPI timing control", false},
+    {0x52, 0x47, "MIPI HS settle", false},
+    {0x53, 0x0F, "MIPI CLK settle", false},
+    
+    // Activation des sorties
+    {0x3A, 0x04, "TSLB - enable MIPI output", true},
+    {0x3D, 0xC0, "COM13 - enable data output", true},
+    {0x3E, 0x03, "COM14 - output enable", false},
+    
+    // Configuration du HREF et des signaux de synchronisation
+    {0x32, 0x80, "HREF control - enable", false},
+    {0x37, 0xC0, "ADC control", false},
+    
+    // Contrôle exposition et gain de base
+    {0x13, 0x87, "COM8 - enable AGC/AEC", false},
+    {0x00, 0x00, "Gain control", false},
+    {0x10, 0x00, "AEC MSB", false},
+    {0x04, 0x00, "AEC LSB", false},
+    
+    // Configuration finale pour démarrer le streaming
+    {0x09, 0x10, "Enable sensor data output", true},
+  };
+
+  for (size_t i = 0; i < sizeof(mipi_config) / sizeof(mipi_config[0]); i++) {
+    ESP_LOGD(TAG, "Setting %s: 0x%02X = 0x%02X", 
+             mipi_config[i].desc, mipi_config[i].reg, mipi_config[i].val);
+    
+    if (!this->write_byte(mipi_config[i].reg, mipi_config[i].val)) {
+      if (mipi_config[i].critical) {
+        ESP_LOGE(TAG, "Failed to write critical MIPI register 0x%02X", mipi_config[i].reg);
+        return false;
+      } else {
+        ESP_LOGW(TAG, "Failed to write MIPI register 0x%02X", mipi_config[i].reg);
+      }
+    }
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+  }
+
+  // 2. Vérification finale
+  ESP_LOGI(TAG, "Step 2: Final MIPI verification");
+  uint8_t verify_regs[] = {0x12, 0x09, 0x15, 0x3A, 0x4F, 0x50};
+  for (size_t i = 0; i < sizeof(verify_regs); i++) {
+    uint8_t val;
+    if (this->read_byte(verify_regs[i], &val)) {
+      ESP_LOGI(TAG, "Verify reg 0x%02X = 0x%02X", verify_regs[i], val);
+    }
+  }
+
+  ESP_LOGI(TAG, "=== SC2356 MIPI configuration completed ===");
+  return true;
+}
+
 bool Tab5Camera::init_ldo_() {
   if (this->ldo_initialized_) {
     ESP_LOGI(TAG, "LDO already initialized, skipping");
@@ -135,23 +337,21 @@ bool Tab5Camera::init_ldo_() {
   
   ESP_LOGI(TAG, "Initializing MIPI LDO regulator");
   
-  // Configuration plus flexible pour le LDO
   esp_ldo_channel_config_t ldo_mipi_phy_config = {
-    .chan_id = 3,  // LDO channel ID pour MIPI
-    .voltage_mv = 2500,  // 2.5V pour MIPI PHY
+    .chan_id = 3,
+    .voltage_mv = 2500,
   };
   
   esp_err_t ret = esp_ldo_acquire_channel(&ldo_mipi_phy_config, &this->ldo_mipi_phy_);
   if (ret != ESP_OK) {
-    ESP_LOGW(TAG, "Failed to acquire MIPI LDO channel: %s - trying to continue anyway", esp_err_to_name(ret));
-    // Ne pas échouer complètement, certains boards peuvent ne pas avoir de LDO MIPI dédié
+    ESP_LOGW(TAG, "Failed to acquire MIPI LDO channel: %s - continuing anyway", esp_err_to_name(ret));
     this->ldo_mipi_phy_ = nullptr;
   } else {
     ESP_LOGI(TAG, "MIPI LDO regulator acquired successfully");
   }
   
   this->ldo_initialized_ = true;
-  return true;  // Retourner true même si le LDO échoue
+  return true;
 }
 
 bool Tab5Camera::init_sensor_() {
@@ -166,12 +366,9 @@ bool Tab5Camera::init_sensor_() {
   uint8_t test_data;
   bool sensor_detected = false;
   
-  // Test de plusieurs registres communs pour détecter le capteur
   const uint8_t test_regs[] = {0x00, 0x01, 0x02, 0x0A, 0x0B, 0x0C, 0x0D};
   for (size_t i = 0; i < sizeof(test_regs); i++) {
-    uint16_t temp_val;
-    if (this->read_byte_16(test_regs[i], &temp_val)) {
-      test_data = static_cast<uint8_t>(temp_val & 0xFF);
+    if (this->read_byte(test_regs[i], &test_data)) {
       ESP_LOGI(TAG, "Sensor responded: reg 0x%02X = 0x%02X", test_regs[i], test_data);
       sensor_detected = true;
     }
@@ -184,203 +381,19 @@ bool Tab5Camera::init_sensor_() {
   
   ESP_LOGI(TAG, "I2C communication OK at address 0x%02X", this->address_);
   
-  // Test de différentes adresses pour l'ID du capteur SC2356
-  uint8_t chip_id_1 = 0, chip_id_2 = 0;
-  uint16_t temp_val;
-  bool id_found = false;
-  
-  // Structure correcte pour les combinaisons d'ID
-  struct id_reg_pair {
-    uint8_t reg1;
-    uint8_t reg2;
-    const char* desc;
-  };
-  
-  const struct id_reg_pair id_combinations[] = {
-    {0x00, 0x01, "Standard ID registers"},
-    {0x0A, 0x0B, "Alternative ID registers"},
-    {0x0C, 0x0D, "Secondary ID registers"},
-    {0x02, 0x03, "Extended ID registers"},
-    {0x10, 0x11, "Manufacturer ID registers"},
-    {0x20, 0x21, "Device ID registers"}
-  };
-  
-  for (size_t i = 0; i < sizeof(id_combinations) / sizeof(id_combinations[0]); i++) {
-    if (this->read_byte_16(id_combinations[i].reg1, &temp_val)) {
-      chip_id_1 = static_cast<uint8_t>(temp_val & 0xFF);
-      if (this->read_byte_16(id_combinations[i].reg2, &temp_val)) {
-        chip_id_2 = static_cast<uint8_t>(temp_val & 0xFF);
-        
-        ESP_LOGI(TAG, "Testing %s: 0x%02X%02X (reg 0x%02X=0x%02X, reg 0x%02X=0x%02X)", 
-                 id_combinations[i].desc, chip_id_1, chip_id_2, 
-                 id_combinations[i].reg1, chip_id_1, id_combinations[i].reg2, chip_id_2);
-        
-        // Vérifier si c'est un ID valide (non-zéro)
-        if (chip_id_1 != 0x00 || chip_id_2 != 0x00) {
-          id_found = true;
-          ESP_LOGI(TAG, "Found valid sensor ID: 0x%02X%02X at registers 0x%02X/0x%02X", 
-                   chip_id_1, chip_id_2, id_combinations[i].reg1, id_combinations[i].reg2);
-          break;
-        }
-      }
-    }
+  // Reset et configuration complète du capteur
+  if (!this->configure_sc2356_()) {
+    ESP_LOGE(TAG, "Failed to configure SC2356 basic settings");
+    return false;
   }
   
-  if (!id_found) {
-    ESP_LOGW(TAG, "No valid sensor ID found, but I2C communication works - continuing with generic config");
-    chip_id_1 = 0x00;
-    chip_id_2 = 0x00;
-  }
-  
-  // Configuration basée sur l'ID trouvé ou configuration générique
-  if (id_found && (chip_id_2 == 0xA0 || chip_id_2 == 0xA2 || chip_id_2 == 0xA1)) {
-    ESP_LOGI(TAG, "SC2356 sensor confirmed! ID: 0x%02X%02X", chip_id_1, chip_id_2);
-    
-    // Configuration SC2356 optimisée
-    ESP_LOGI(TAG, "Configuring SC2356 with full register set...");
-    
-    struct sc2356_reg {
-      uint8_t reg;
-      uint8_t val;
-      const char* desc;
-      bool critical;
-    };
-    
-    const struct sc2356_reg sc2356_config[] = {
-      // Reset et initialisation
-      {0x12, 0x80, "Software reset", true},
-      {0x09, 0x10, "System control", true},
-      {0x0C, 0x00, "Output control", false},
-      {0x0D, 0x01, "Output format enable", false},
-      
-      // Configuration de la résolution VGA (640x480)
-      {0x17, 0x00, "HSTART High", false},
-      {0x18, 0xA0, "HSIZE High", false},
-      {0x19, 0x00, "VSTART High", false},
-      {0x1A, 0x78, "VSIZE High", false},
-      {0x03, 0x00, "VREF", false},
-      
-      // Format de sortie RGB565
-      {0x15, 0x02, "Output format RGB565", false},
-      {0x40, 0x10, "COM15 RGB565 full range", false},
-      
-      // Configuration des horloges et timing
-      {0x11, 0x00, "Clock prescaler", false},
-      {0x32, 0x00, "HREF control", false},
-      {0x37, 0x00, "ADC control", false},
-      
-      // Configuration MIPI/DVP
-      {0x3A, 0x04, "TSLB MIPI enable", false},
-      {0x3D, 0x99, "COM13", false},
-      {0x3E, 0x03, "COM14", false},
-      
-      // Contrôle exposition et gain automatique
-      {0x13, 0x87, "COM8 AGC/AEC enable", false},
-      {0x00, 0x00, "Gain control", false},
-      {0x10, 0x00, "AEC MSB", false},
-      {0x04, 0x00, "AEC LSB", false},
-      
-      // Sortir du mode standby
-      {0x12, 0x00, "Normal operation mode", true}
-    };
-    
-    bool config_success = true;
-    bool reset_done = false;
-    
-    for (size_t i = 0; i < sizeof(sc2356_config) / sizeof(sc2356_config[0]); i++) {
-      ESP_LOGD(TAG, "Setting %s: reg 0x%02X = 0x%02X", 
-               sc2356_config[i].desc, sc2356_config[i].reg, sc2356_config[i].val);
-      
-      if (!this->write_byte(sc2356_config[i].reg, sc2356_config[i].val)) {
-        if (sc2356_config[i].critical) {
-          ESP_LOGE(TAG, "Critical register write failed: 0x%02X", sc2356_config[i].reg);
-          config_success = false;
-          break;
-        } else {
-          ESP_LOGW(TAG, "Non-critical register write failed: 0x%02X - continuing", sc2356_config[i].reg);
-        }
-      }
-      
-      // Délai spécial après reset
-      if (sc2356_config[i].reg == 0x12 && sc2356_config[i].val == 0x80 && !reset_done) {
-        ESP_LOGI(TAG, "Waiting 50ms after sensor reset...");
-        vTaskDelay(50 / portTICK_PERIOD_MS);
-        reset_done = true;
-      } else {
-        vTaskDelay(5 / portTICK_PERIOD_MS);
-      }
-    }
-    
-    if (!config_success) {
-      ESP_LOGE(TAG, "SC2356 critical configuration failed");
-      return false;
-    }
-    
-  } else {
-    ESP_LOGW(TAG, "Using generic sensor configuration (ID: 0x%02X%02X)", chip_id_1, chip_id_2);
-    
-    // Configuration générique mais plus complète
-    struct generic_reg {
-      uint8_t reg;
-      uint8_t val;
-      const char* desc;
-    };
-    
-    const struct generic_reg generic_config[] = {
-      {0x12, 0x00, "Normal operation"},
-      {0x09, 0x00, "System control"},
-      {0x15, 0x00, "Output format"},
-      {0x11, 0x00, "Clock control"},
-      {0x3A, 0x04, "TSLB register"},
-      {0x13, 0x80, "COM8 basic"}
-    };
-    
-    for (size_t i = 0; i < sizeof(generic_config) / sizeof(generic_config[0]); i++) {
-      ESP_LOGD(TAG, "Setting %s: reg 0x%02X = 0x%02X", 
-               generic_config[i].desc, generic_config[i].reg, generic_config[i].val);
-      
-      if (!this->write_byte(generic_config[i].reg, generic_config[i].val)) {
-        ESP_LOGW(TAG, "Failed to write register 0x%02X", generic_config[i].reg);
-      }
-      vTaskDelay(10 / portTICK_PERIOD_MS);
-    }
-  }
-  
-  // Test final de communication
-  bool final_test_ok = false;
-  const uint8_t final_test_regs[] = {0x00, 0x01, 0x0A, 0x12};
-  for (size_t i = 0; i < sizeof(final_test_regs); i++) {
-    uint16_t final_val;
-    if (this->read_byte_16(final_test_regs[i], &final_val)) {
-      ESP_LOGI(TAG, "Final test: reg 0x%02X = 0x%02X", final_test_regs[i], (uint8_t)(final_val & 0xFF));
-      final_test_ok = true;
-      break;
-    }
-  }
-  
-  if (!final_test_ok) {
-    ESP_LOGE(TAG, "Final sensor communication test failed");
+  if (!this->configure_sc2356_mipi_output_()) {
+    ESP_LOGE(TAG, "Failed to configure SC2356 MIPI output");
     return false;
   }
   
   this->sensor_initialized_ = true;
-  ESP_LOGI(TAG, "Camera sensor initialized successfully");
-  
-  return true;
-}
-// Fixed write_register_16 function using correct ESPHome I2C API
-bool Tab5Camera::write_register_16(uint16_t reg, uint8_t val) {
-  // For 16-bit registers, we need to write address high byte, low byte, then value
-  uint8_t buffer[3] = {
-    static_cast<uint8_t>(reg >> 8),   // High byte of register address
-    static_cast<uint8_t>(reg & 0xFF), // Low byte of register address  
-    val                               // Value to write
-  };
-  
-  if (!this->write(buffer, 3)) {
-    ESP_LOGD(TAG, "Failed to write 16-bit register 0x%04X = 0x%02X", reg, val);
-    return false;
-  }
+  ESP_LOGI(TAG, "SC2356 sensor initialized successfully");
   
   return true;
 }
@@ -401,18 +414,12 @@ bool Tab5Camera::init_camera_() {
   }
   ESP_LOGI(TAG, "MIPI LDO initialized successfully");
 
-  // Étape 2: Reset de la caméra si pin disponible
-  if (this->reset_pin_) {
-    ESP_LOGI(TAG, "Step 2.2: Executing camera reset sequence");
-    this->reset_pin_->setup();
-    this->reset_pin_->digital_write(false);
-    delayMicroseconds(10000);  // 10ms
-    this->reset_pin_->digital_write(true);
-    delayMicroseconds(10000);  // 10ms
-    ESP_LOGI(TAG, "Camera reset completed");
-  } else {
-    ESP_LOGI(TAG, "Step 2.2: No reset pin configured, skipping reset");
+  // Étape 2: Reset de la caméra
+  ESP_LOGI(TAG, "Step 2.2: Executing camera sensor reset");
+  if (!this->reset_sensor_()) {
+    ESP_LOGW(TAG, "Camera reset failed, but continuing initialization");
   }
+  ESP_LOGI(TAG, "Camera reset sequence completed");
 
   // Étape 3: Initialisation du capteur I2C
   ESP_LOGI(TAG, "Step 2.3: Initializing camera sensor");
@@ -425,20 +432,14 @@ bool Tab5Camera::init_camera_() {
   // Étape 4: Allocation du frame buffer
   ESP_LOGI(TAG, "Step 2.4: Allocating frame buffer");
 
-  // Calcul de la taille réelle requise
   this->frame_buffer_size_ = TAB5_CAMERA_H_RES * TAB5_CAMERA_V_RES * 2; // RGB565 = 2 bytes par pixel
-
-  // Arrondi sur un multiple de 64 (cache line size)
-  this->frame_buffer_size_ = (this->frame_buffer_size_ + 63) & ~63;
+  this->frame_buffer_size_ = (this->frame_buffer_size_ + 63) & ~63; // Alignement 64 bytes
 
   ESP_LOGI(TAG, "Aligned frame buffer size: %zu bytes", this->frame_buffer_size_);
 
-  // Allocation alignée en PSRAM
   this->frame_buffer_ = heap_caps_aligned_alloc(64, this->frame_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!this->frame_buffer_) {
-    ESP_LOGE(TAG, "Failed to allocate aligned frame buffer in PSRAM (%zu bytes) - trying regular RAM", this->frame_buffer_size_);
-
-    // Essai avec RAM normale
+    ESP_LOGE(TAG, "Failed to allocate aligned frame buffer in PSRAM - trying regular RAM");
     this->frame_buffer_ = heap_caps_aligned_alloc(64, this->frame_buffer_size_, MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
     if (!this->frame_buffer_) {
       ESP_LOGE(TAG, "Failed to allocate aligned frame buffer in regular RAM also");
@@ -459,7 +460,7 @@ bool Tab5Camera::init_camera_() {
   csi_config.output_data_color_type = CAM_CTLR_COLOR_RGB565;
   csi_config.data_lane_num = 2;
   csi_config.byte_swap_en = false;
-  csi_config.queue_items = 4;  // Plus de buffers dans la queue
+  csi_config.queue_items = 4;
 
   esp_err_t ret = esp_cam_new_csi_ctlr(&csi_config, &this->cam_handle_);
   if (ret != ESP_OK) {
@@ -471,7 +472,7 @@ bool Tab5Camera::init_camera_() {
   // Étape 6: Configuration des callbacks
   ESP_LOGI(TAG, "Step 2.6: Registering camera callbacks");
   esp_cam_ctlr_evt_cbs_t cbs = {
-    .on_get_new_trans = nullptr,  // IMPORTANT: laisser à nullptr pour utiliser la queue interne !
+    .on_get_new_trans = nullptr,
     .on_trans_finished = Tab5Camera::camera_get_finished_trans_callback,
   };
   
@@ -519,7 +520,7 @@ bool Tab5Camera::init_camera_() {
   
   // Étape 9: Initialisation du frame buffer
   ESP_LOGI(TAG, "Step 2.9: Initializing frame buffer");
-  memset(this->frame_buffer_, 0xFF, this->frame_buffer_size_);
+  memset(this->frame_buffer_, 0x00, this->frame_buffer_size_);
   esp_cache_msync(this->frame_buffer_, this->frame_buffer_size_, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
   ESP_LOGI(TAG, "Frame buffer initialized");
   
@@ -534,6 +535,199 @@ bool Tab5Camera::init_camera_() {
   this->camera_initialized_ = true;
   ESP_LOGI(TAG, "Camera '%s' initialized successfully - all steps completed", this->name_.c_str());
   return true;
+}
+
+void Tab5Camera::process_frame_(uint8_t* data, size_t len) {
+  this->frame_count_++;
+  this->last_frame_timestamp_ = millis();
+  
+  ESP_LOGV(TAG, "Processing frame #%u: %zu bytes", this->frame_count_, len);
+  
+  // Appeler les callbacks traditionnels
+  this->on_frame_callbacks_.call(data, len);
+  
+  // Déclencher les triggers ESPHome
+  this->trigger_on_frame_callbacks_(data, len);
+}
+
+void Tab5Camera::trigger_on_frame_callbacks_(uint8_t* data, size_t len) {
+  for (auto *trigger : this->on_frame_triggers_) {
+    trigger->trigger(data, len);
+  }
+}
+
+bool Tab5Camera::camera_get_finished_trans_callback(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data) {
+  Tab5Camera *camera = static_cast<Tab5Camera*>(user_data);
+  if (!camera || !trans->buffer) {
+    ESP_LOGE(TAG, "Invalid callback data");
+    return false;
+  }
+
+  // Compteur de frames pour diagnostics
+  static uint32_t frame_count = 0;
+  frame_count++;
+  
+  ESP_LOGI(TAG, "📸 Frame #%u received: %zu bytes (expected: %zu)", 
+           frame_count, trans->received_size, camera->frame_buffer_size_);
+
+  if (trans->received_size == 0) {
+    ESP_LOGW(TAG, "⚠️ Frame #%u is empty - sensor might not be generating data", frame_count);
+    return false;
+  }
+  
+  if (trans->received_size < 1000) {
+    ESP_LOGW(TAG, "⚠️ Frame #%u size is very small (%zu bytes)", frame_count, trans->received_size);
+  }
+
+  // Synchronisation du cache pour la frame reçue
+  esp_cache_msync(trans->buffer, trans->received_size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+  
+  // Vérification du contenu des premiers bytes
+  uint8_t *data = static_cast<uint8_t*>(trans->buffer);
+  ESP_LOGD(TAG, "Frame #%u first bytes: %02X %02X %02X %02X %02X %02X %02X %02X", 
+           frame_count, data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]);
+  
+  // Traitement de la frame
+  camera->process_frame_(data, trans->received_size);
+  
+  // Création d'une structure FrameData
+  FrameData frame;
+  frame.buffer = trans->buffer;
+  frame.size = trans->received_size;
+  frame.timestamp = esp_timer_get_time();
+  frame.valid = true;
+  
+  // Envoi non-bloquant vers la queue applicative
+  BaseType_t ret = xQueueSendFromISR(camera->frame_queue_, &frame, NULL);
+  if (ret == pdTRUE) {
+    xSemaphoreGiveFromISR(camera->frame_ready_semaphore_, NULL);
+    ESP_LOGV(TAG, "Frame #%u queued successfully", frame_count);
+  } else {
+    ESP_LOGD(TAG, "Application frame queue full, dropping frame #%u", frame_count);
+  }
+
+  return false;
+}
+
+bool Tab5Camera::take_snapshot() {
+  if (!this->camera_initialized_) {
+    ESP_LOGE(TAG, "Camera '%s' not initialized", this->name_.c_str());
+    return false;
+  }
+  
+  ESP_LOGI(TAG, "Taking snapshot with camera '%s'", this->name_.c_str());
+  
+  esp_cam_ctlr_trans_t trans = {
+    .buffer = this->frame_buffer_,
+    .buflen = this->frame_buffer_size_,
+  };
+  
+  esp_err_t ret = esp_cam_ctlr_receive(this->cam_handle_, &trans, 5000 / portTICK_PERIOD_MS); // 5 secondes timeout
+  if (ret != ESP_OK) {
+    ESP_LOGW(TAG, "Camera '%s' capture failed: %s", this->name_.c_str(), esp_err_to_name(ret));
+    return false;
+  }
+  
+  ESP_LOGI(TAG, "Camera '%s' snapshot taken, size: %zu bytes", this->name_.c_str(), trans.received_size);
+  
+  // Synchronisation du cache
+  esp_cache_msync(this->frame_buffer_, trans.received_size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+  
+  // Traitement de la frame
+  this->process_frame_(static_cast<uint8_t*>(this->frame_buffer_), trans.received_size);
+  
+  return true;
+}
+
+bool Tab5Camera::start_streaming() {
+  if (!this->camera_initialized_) {
+    ESP_LOGE(TAG, "Camera '%s' not initialized for streaming", this->name_.c_str());
+    return false;
+  }
+  
+  if (this->streaming_active_) {
+    ESP_LOGW(TAG, "Camera '%s' streaming already active", this->name_.c_str());
+    return true;
+  }
+  
+  ESP_LOGI(TAG, "Starting streaming for camera '%s'", this->name_.c_str());
+  
+  this->streaming_should_stop_ = false;
+  this->streaming_active_ = true;
+  
+  // Création de la tâche de streaming
+  BaseType_t result = xTaskCreate(
+    Tab5Camera::streaming_task,
+    "tab5_streaming",
+    TAB5_STREAMING_STACK_SIZE,
+    this,
+    5,
+    &this->streaming_task_handle_
+  );
+  
+  if (result != pdPASS) {
+    ESP_LOGE(TAG, "Failed to create streaming task");
+    this->streaming_active_ = false;
+    return false;
+  }
+  
+  ESP_LOGI(TAG, "Camera '%s' streaming started", this->name_.c_str());
+  return true;
+}
+
+bool Tab5Camera::stop_streaming() {
+  if (!this->streaming_active_) {
+    return true;
+  }
+  
+  ESP_LOGI(TAG, "Stopping camera '%s' streaming...", this->name_.c_str());
+  
+  this->streaming_should_stop_ = true;
+  
+  if (this->streaming_task_handle_) {
+    xSemaphoreGive(this->frame_ready_semaphore_);
+    
+    uint32_t timeout = 0;
+    while (this->streaming_active_ && timeout < 50) {
+      vTaskDelay(100 / portTICK_PERIOD_MS);
+      timeout++;
+    }
+    
+    if (this->streaming_active_) {
+      ESP_LOGW(TAG, "Force stopping streaming task");
+      vTaskDelete(this->streaming_task_handle_);
+      this->streaming_active_ = false;
+    }
+    
+    this->streaming_task_handle_ = nullptr;
+  }
+  
+  ESP_LOGI(TAG, "Camera '%s' streaming stopped", this->name_.c_str());
+  return true;
+}
+
+void Tab5Camera::streaming_task(void *parameter) {
+  Tab5Camera *camera = static_cast<Tab5Camera*>(parameter);
+  camera->streaming_loop_();
+}
+
+void Tab5Camera::streaming_loop_() {
+  ESP_LOGI(TAG, "Streaming loop started for camera '%s' (callback-based)", this->name_.c_str());
+
+  while (!this->streaming_should_stop_) {
+    if (xSemaphoreTake(this->frame_ready_semaphore_, 100 / portTICK_PERIOD_MS) == pdTRUE) {
+      FrameData frame;
+      if (xQueueReceive(this->frame_queue_, &frame, 0) == pdTRUE) {
+        ESP_LOGV(TAG, "Frame received from callback, size: %zu bytes", frame.size);
+        // Le traitement est déjà fait dans process_frame_
+      }
+    }
+    vTaskDelay(1 / portTICK_PERIOD_MS);
+  }
+
+  this->streaming_active_ = false;
+  ESP_LOGI(TAG, "Streaming loop ended for camera '%s'", this->name_.c_str());
+  vTaskDelete(nullptr);
 }
 
 void Tab5Camera::deinit_camera_() {
@@ -573,7 +767,6 @@ void Tab5Camera::deinit_camera_() {
     ESP_LOGD(TAG, "Camera '%s' deinitialized", this->name_.c_str());
   }
   
-  // Nettoyage des objets de synchronisation
   if (this->frame_ready_semaphore_) {
     vSemaphoreDelete(this->frame_ready_semaphore_);
     this->frame_ready_semaphore_ = nullptr;
@@ -585,205 +778,79 @@ void Tab5Camera::deinit_camera_() {
   }
 }
 
-// CORRIGÉ - Callback de fin de transaction avec diagnostics
-bool Tab5Camera::camera_get_finished_trans_callback(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data) {
-  Tab5Camera *camera = static_cast<Tab5Camera*>(user_data);
-  if (!camera || !trans->buffer) {
-    ESP_LOGE(TAG, "camera_get_finished_trans_callback called with invalid data");
-    return false;
-  }
-
-  // Compteur de frames pour diagnostics
-  static uint32_t frame_count = 0;
-  frame_count++;
-  
-  ESP_LOGI(TAG, "📸 Frame #%lu received: %zu bytes (expected: %zu)", 
-           frame_count, trans->received_size, camera->frame_buffer_size_);
-
-  // Vérification de la taille des données
-  if (trans->received_size == 0) {
-    ESP_LOGW(TAG, "⚠️ Frame #%lu is empty - sensor might not be generating data", frame_count);
-    return false;
-  }
-  
-  if (trans->received_size < 1000) {  // Taille suspicieusement petite
-    ESP_LOGW(TAG, "⚠️ Frame #%lu size is very small (%zu bytes)", frame_count, trans->received_size);
-  }
-
-  // Synchronisation du cache pour la frame reçue
-  esp_cache_msync(trans->buffer, trans->received_size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
-  
-  // Vérification du contenu des premiers bytes (diagnostics)
-  uint8_t *data = static_cast<uint8_t*>(trans->buffer);
-  ESP_LOGD(TAG, "Frame #%lu first bytes: %02X %02X %02X %02X %02X %02X %02X %02X", 
-           frame_count, data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]);
-  
-  // Création d'une structure FrameData avec les vraies données reçues
-  FrameData frame;
-  frame.buffer = trans->buffer;
-  frame.size = trans->received_size;
-  frame.timestamp = esp_timer_get_time();
-  
-  // Envoi non-bloquant vers la queue applicative
-  BaseType_t ret = xQueueSendFromISR(camera->frame_queue_, &frame, NULL);
-  if (ret == pdTRUE) {
-    // Signaler qu'une frame est disponible
-    xSemaphoreGiveFromISR(camera->frame_ready_semaphore_, NULL);
-    ESP_LOGV(TAG, "Frame #%lu queued successfully", frame_count);
-  } else {
-    // Queue pleine - on peut choisir d'overwrite ou de dropper
-    ESP_LOGD(TAG, "Application frame queue full, dropping frame #%lu", frame_count);
-  }
-
-  return false;
+// Méthodes utilitaires
+void Tab5Camera::set_error_(const std::string &error) {
+  this->error_state_ = true;
+  this->last_error_ = error;
+  this->error_count_++;
+  ESP_LOGE(TAG, "Camera error: %s", error.c_str());
 }
 
-bool Tab5Camera::take_snapshot() {
-  if (!this->camera_initialized_) {
-    ESP_LOGE(TAG, "Camera '%s' not initialized", this->name_.c_str());
-    return false;
+void Tab5Camera::clear_error_() {
+  this->error_state_ = false;
+  this->last_error_ = "";
+}
+
+PixelFormat Tab5Camera::parse_pixel_format_(const std::string &format) {
+  if (format == "RAW8") return PixelFormat::RAW8;
+  if (format == "RAW10") return PixelFormat::RAW10;
+  if (format == "YUV422") return PixelFormat::YUV422;
+  if (format == "RGB565") return PixelFormat::RGB565;
+  if (format == "JPEG") return PixelFormat::JPEG;
+  return PixelFormat::RGB565;
+}
+
+size_t Tab5Camera::calculate_frame_size_() const {
+  uint16_t bytes_per_pixel = 2; // RGB565 par défaut
+  
+  switch (this->parse_pixel_format_(this->pixel_format_)) {
+    case PixelFormat::RAW8:
+      bytes_per_pixel = 1;
+      break;
+    case PixelFormat::RAW10:
+      bytes_per_pixel = 2;
+      break;
+    case PixelFormat::YUV422:
+      bytes_per_pixel = 2;
+      break;
+    case PixelFormat::RGB565:
+      bytes_per_pixel = 2;
+      break;
+    case PixelFormat::JPEG:
+      bytes_per_pixel = 1; // Variable, approximation
+      break;
   }
   
-  ESP_LOGD(TAG, "Taking snapshot with camera '%s'", this->name_.c_str());
-  
-  esp_cam_ctlr_trans_t trans = {
-    .buffer = this->frame_buffer_,
-    .buflen = this->frame_buffer_size_,
+  return this->frame_width_ * this->frame_height_ * bytes_per_pixel;
+}
+
+bool Tab5Camera::write_register_16(uint16_t reg, uint8_t val) {
+  uint8_t buffer[3] = {
+    static_cast<uint8_t>(reg >> 8),
+    static_cast<uint8_t>(reg & 0xFF),
+    val
   };
   
-  esp_err_t ret = esp_cam_ctlr_receive(this->cam_handle_, &trans, 1000 / portTICK_PERIOD_MS);
-  if (ret != ESP_OK) {
-    ESP_LOGW(TAG, "Camera '%s' capture failed: %s", this->name_.c_str(), esp_err_to_name(ret));
+  if (!this->write(buffer, 3)) {
+    ESP_LOGD(TAG, "Failed to write 16-bit register 0x%04X = 0x%02X", reg, val);
     return false;
   }
-  
-  ESP_LOGD(TAG, "Camera '%s' snapshot taken, size: %zu bytes", this->name_.c_str(), trans.received_size);
-  
-  // Synchronisation du cache
-  esp_cache_msync(this->frame_buffer_, trans.received_size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
-  
-  // Appel des callbacks avec la taille réelle reçue
-  this->on_frame_callbacks_.call(static_cast<uint8_t*>(this->frame_buffer_), trans.received_size);
   
   return true;
 }
 
-bool Tab5Camera::start_streaming() {
-  if (!this->camera_initialized_) {
-    ESP_LOGE(TAG, "Camera '%s' not initialized for streaming", this->name_.c_str());
-    return false;
-  }
-  
-  if (this->streaming_active_) {
-    ESP_LOGW(TAG, "Camera '%s' streaming already active", this->name_.c_str());
-    return true;
-  }
-  
-  ESP_LOGD(TAG, "Starting streaming for camera '%s'", this->name_.c_str());
-  
-  this->streaming_should_stop_ = false;
-  this->streaming_active_ = true;
-  
-  // Pré-envoyer une transaction initiale pour démarrer le processus
-  ESP_LOGI(TAG, "Sending initial transaction to start streaming");
-  esp_cam_ctlr_trans_t initial_trans = {
-    .buffer = this->frame_buffer_,
-    .buflen = this->frame_buffer_size_,
+bool Tab5Camera::read_register_16(uint16_t reg, uint8_t *val) {
+  uint8_t buffer[2] = {
+    static_cast<uint8_t>(reg >> 8),
+    static_cast<uint8_t>(reg & 0xFF)
   };
   
-  esp_err_t ret = esp_cam_ctlr_receive(this->cam_handle_, &initial_trans, 1000 / portTICK_PERIOD_MS);
-  if (ret != ESP_OK) {
-    ESP_LOGW(TAG, "Failed to send initial transaction: %s", esp_err_to_name(ret));
-    // Continue anyway, les callbacks peuvent compenser
-  }
-  
-  // Création de la tâche de streaming
-  BaseType_t result = xTaskCreate(
-    Tab5Camera::streaming_task,
-    "tab5_streaming",
-    TAB5_STREAMING_STACK_SIZE,
-    this,
-    5,  // Priorité élevée pour le streaming
-    &this->streaming_task_handle_
-  );
-  
-  if (result != pdPASS) {
-    ESP_LOGE(TAG, "Failed to create streaming task");
-    this->streaming_active_ = false;
+  if (!this->write(buffer, 2) || !this->read(val, 1)) {
+    ESP_LOGD(TAG, "Failed to read 16-bit register 0x%04X", reg);
     return false;
   }
   
-  ESP_LOGI(TAG, "Camera '%s' streaming started", this->name_.c_str());
   return true;
-}
-
-bool Tab5Camera::stop_streaming() {
-  if (!this->streaming_active_) {
-    return true;
-  }
-  
-  ESP_LOGD(TAG, "Stopping camera '%s' streaming...", this->name_.c_str());
-  
-  this->streaming_should_stop_ = true;
-  
-  // Attendre l'arrêt de la tâche
-  if (this->streaming_task_handle_) {
-    // Signal pour débloquer la tâche si elle attend
-    xSemaphoreGive(this->frame_ready_semaphore_);
-    
-    // Attendre la fin de la tâche
-    uint32_t timeout = 0;
-    while (this->streaming_active_ && timeout < 50) {  // 5 secondes max
-      vTaskDelay(100 / portTICK_PERIOD_MS);
-      timeout++;
-    }
-    
-    if (this->streaming_active_) {
-      ESP_LOGW(TAG, "Force stopping streaming task");
-      vTaskDelete(this->streaming_task_handle_);
-      this->streaming_active_ = false;
-    }
-    
-    this->streaming_task_handle_ = nullptr;
-  }
-  
-  ESP_LOGI(TAG, "Camera '%s' streaming stopped", this->name_.c_str());
-  return true;
-}
-
-void Tab5Camera::streaming_task(void *parameter) {
-  Tab5Camera *camera = static_cast<Tab5Camera*>(parameter);
-  camera->streaming_loop_();
-}
-
-// NOUVELLE méthode de streaming - approche différente pour éviter le conflit de queue
-void Tab5Camera::streaming_loop_() {
-  ESP_LOGD(TAG, "Streaming loop started for camera '%s' (callback-based)", this->name_.c_str());
-
-  // Au lieu d'appeler esp_cam_ctlr_receive() en boucle (qui sature la queue),
-  // on utilise uniquement les callbacks pour récupérer les frames
-  
-  while (!this->streaming_should_stop_) {
-    // Attendre qu'une frame soit disponible via le callback
-    if (xSemaphoreTake(this->frame_ready_semaphore_, 100 / portTICK_PERIOD_MS) == pdTRUE) {
-      
-      // Récupérer les données de frame depuis notre queue applicative
-      FrameData frame;
-      if (xQueueReceive(this->frame_queue_, &frame, 0) == pdTRUE) {
-        ESP_LOGV(TAG, "Frame received from callback, size: %zu bytes", frame.size);
-        
-        // Appel des callbacks avec les données reçues
-        this->on_frame_callbacks_.call(static_cast<uint8_t*>(frame.buffer), frame.size);
-      }
-    }
-    
-    // Petite pause pour éviter de surcharger le système
-    vTaskDelay(1 / portTICK_PERIOD_MS);
-  }
-
-  this->streaming_active_ = false;
-  ESP_LOGD(TAG, "Streaming loop ended for camera '%s'", this->name_.c_str());
-  vTaskDelete(nullptr);
 }
 
 #endif
