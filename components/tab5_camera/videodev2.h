@@ -57,12 +57,12 @@
 #ifndef __LINUX_VIDEODEV2_H
 #define __LINUX_VIDEODEV2_H
 
-#include <sys/time.h>
+#include "time.h"
 
-#include <ioctl.h>
-#include <types.h>
-#include <v4l2-common.h>
-#include <v4l2-controls.h>
+#include "ioctl.h"
+#include "types.h"
+#include "v4l2-common.h"
+#include "v4l2-controls.h"
 
 /*
  * Common stuff for both V4L1 and V4L2
