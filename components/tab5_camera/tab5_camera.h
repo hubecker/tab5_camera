@@ -22,7 +22,7 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "freertos/queue.h"
-#include "esp_cam_sensor.h"
+//#include "esp_cam_sensor.h"
 
 // Vérification des versions IDF
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 1, 0)
