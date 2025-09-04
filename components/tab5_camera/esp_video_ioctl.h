@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "linux/videodev2.h"
+#include "videodev2.h"
 #include "esp_cam_sensor_types.h"
 
 #ifdef __cplusplus
