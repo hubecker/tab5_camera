@@ -791,7 +791,7 @@ void Tab5Camera::clear_error_() {
   this->last_error_ = "";
 }
 
-PixelFormat Tab5Camera::parse_pixel_format_(const std::string &format) {
+PixelFormat Tab5Camera::parse_pixel_format_(const std::string &format) const {  // Ajout de const
   if (format == "RAW8") return PixelFormat::RAW8;
   if (format == "RAW10") return PixelFormat::RAW10;
   if (format == "YUV422") return PixelFormat::YUV422;
