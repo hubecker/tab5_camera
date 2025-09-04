@@ -168,10 +168,13 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
 
   // Séquence de reset améliorée
   bool reset_sensor_();
-  bool setup_external_clock_();
+  bool setup_external_clock_();  // NOUVEAU - Configuration horloge LEDC
 
   // Configuration spécifique SC2356
   bool configure_sc2356_();
+  bool configure_sc2356_8bit_();
+  bool configure_sc2356_16bit_();
+  bool configure_sc2356_generic_();
   bool configure_sc2356_mipi_output_();
   
   // Debug et diagnostic
