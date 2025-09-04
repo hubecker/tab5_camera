@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "linux/ioctl.h"
+#include "ioctl.h"
 #include "esp_vfs.h"
 #include "esp_video.h"
 
