@@ -12,7 +12,7 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "esp_err.h"
-#include "linux/videodev2.h"
+#include "videodev2.h"
 #include "esp_video_buffer.h"
 #include "esp_video_internal.h"
 
