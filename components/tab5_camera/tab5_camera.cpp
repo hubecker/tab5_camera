@@ -309,39 +309,6 @@ bool Tab5Camera::setup_external_clock_() {
   return true;
 }
 
-// Modifiez la méthode init_camera_() pour inclure l'horloge
-bool Tab5Camera::init_camera_() {
-  if (this->camera_initialized_) {
-    ESP_LOGI(TAG, "Camera already initialized, skipping");
-    return true;
-  }
-
-  ESP_LOGI(TAG, "Starting camera initialization for '%s'", this->name_.c_str());
-
-  // Étape 0: Configuration de l'horloge externe (NOUVEAU - CRITIQUE)
-  ESP_LOGI(TAG, "Step 2.0: Setting up external clock");
-  if (!this->setup_external_clock_()) {
-    ESP_LOGE(TAG, "Failed to setup external clock - camera will not work");
-    return false;
-  }
-  ESP_LOGI(TAG, "External clock configured successfully");
-
-  // Étape 1: Initialisation du LDO MIPI
-  ESP_LOGI(TAG, "Step 2.1: Initializing MIPI LDO");
-  if (!this->init_ldo_()) {
-    ESP_LOGE(TAG, "Failed to initialize MIPI LDO");
-    return false;
-  }
-  ESP_LOGI(TAG, "MIPI LDO initialized successfully");
-
-  // Étape 2: Reset de la caméra (APRÈS l'horloge)
-  ESP_LOGI(TAG, "Step 2.2: Executing camera sensor reset");
-  vTaskDelay(100 / portTICK_PERIOD_MS);  // Laisser l'horloge se stabiliser
-  if (!this->reset_sensor_()) {
-    ESP_LOGW(TAG, "Camera reset failed, but continuing initialization");
-  }
-  ESP_LOGI(TAG, "Camera reset sequence completed");
-
 
 bool Tab5Camera::configure_sc2356_mipi_output_() {
   ESP_LOGI(TAG, "=== SC2356 MIPI OUTPUT CONFIGURATION ===");
@@ -485,6 +452,14 @@ bool Tab5Camera::init_camera_() {
 
   ESP_LOGI(TAG, "Starting camera initialization for '%s'", this->name_.c_str());
 
+  // Étape 0: Configuration de l'horloge externe (NOUVEAU - CRITIQUE)
+  ESP_LOGI(TAG, "Step 2.0: Setting up external clock");
+  if (!this->setup_external_clock_()) {
+    ESP_LOGE(TAG, "Failed to setup external clock - camera will not work");
+    return false;
+  }
+  ESP_LOGI(TAG, "External clock configured successfully");
+
   // Étape 1: Initialisation du LDO MIPI
   ESP_LOGI(TAG, "Step 2.1: Initializing MIPI LDO");
   if (!this->init_ldo_()) {
@@ -493,8 +468,9 @@ bool Tab5Camera::init_camera_() {
   }
   ESP_LOGI(TAG, "MIPI LDO initialized successfully");
 
-  // Étape 2: Reset de la caméra
+  // Étape 2: Reset de la caméra (APRÈS l'horloge)
   ESP_LOGI(TAG, "Step 2.2: Executing camera sensor reset");
+  vTaskDelay(100 / portTICK_PERIOD_MS);  // Laisser l'horloge se stabiliser
   if (!this->reset_sensor_()) {
     ESP_LOGW(TAG, "Camera reset failed, but continuing initialization");
   }
