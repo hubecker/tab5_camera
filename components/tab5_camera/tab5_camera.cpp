@@ -177,28 +177,31 @@ bool Tab5Camera::init_sensor_() {
   }
   
   if (!sensor_detected) {
-    ESP_LOGE(TAG, "❌ No sensor detected at I2C address 0x%02X - check wiring!", this->address_);
+    ESP_LOGE(TAG, "No sensor detected at I2C address 0x%02X - check wiring!", this->address_);
     return false;
   }
   
-  ESP_LOGI(TAG, "✅ I2C communication OK at address 0x%02X", this->address_);
+  ESP_LOGI(TAG, "I2C communication OK at address 0x%02X", this->address_);
   
-  // NOUVEAU: Test de différentes adresses pour l'ID du capteur SC2356
+  // Test de différentes adresses pour l'ID du capteur SC2356
   uint8_t chip_id_1 = 0, chip_id_2 = 0;
   uint16_t temp_val;
   bool id_found = false;
   
-  // Essayer différentes combinaisons d'adresses pour l'ID
-  const struct {
-    uint8_t reg1, reg2;
+  // Structure correcte pour les combinaisons d'ID
+  struct id_reg_pair {
+    uint8_t reg1;
+    uint8_t reg2;
     const char* desc;
-  } id_combinations[] = {
+  };
+  
+  const struct id_reg_pair id_combinations[] = {
     {0x00, 0x01, "Standard ID registers"},
     {0x0A, 0x0B, "Alternative ID registers"},
     {0x0C, 0x0D, "Secondary ID registers"},
     {0x02, 0x03, "Extended ID registers"},
     {0x10, 0x11, "Manufacturer ID registers"},
-    {0x20, 0x21, "Device ID registers"},
+    {0x20, 0x21, "Device ID registers"}
   };
   
   for (size_t i = 0; i < sizeof(id_combinations) / sizeof(id_combinations[0]); i++) {
@@ -207,14 +210,14 @@ bool Tab5Camera::init_sensor_() {
       if (this->read_byte_16(id_combinations[i].reg2, &temp_val)) {
         chip_id_2 = static_cast<uint8_t>(temp_val & 0xFF);
         
-        ESP_LOGI(TAG, "🔍 %s: 0x%02X%02X (reg 0x%02X=0x%02X, reg 0x%02X=0x%02X)", 
+        ESP_LOGI(TAG, "Testing %s: 0x%02X%02X (reg 0x%02X=0x%02X, reg 0x%02X=0x%02X)", 
                  id_combinations[i].desc, chip_id_1, chip_id_2, 
                  id_combinations[i].reg1, chip_id_1, id_combinations[i].reg2, chip_id_2);
         
         // Vérifier si c'est un ID valide (non-zéro)
         if (chip_id_1 != 0x00 || chip_id_2 != 0x00) {
           id_found = true;
-          ESP_LOGI(TAG, "🎯 Found valid sensor ID: 0x%02X%02X at registers 0x%02X/0x%02X", 
+          ESP_LOGI(TAG, "Found valid sensor ID: 0x%02X%02X at registers 0x%02X/0x%02X", 
                    chip_id_1, chip_id_2, id_combinations[i].reg1, id_combinations[i].reg2);
           break;
         }
@@ -223,47 +226,45 @@ bool Tab5Camera::init_sensor_() {
   }
   
   if (!id_found) {
-    ESP_LOGW(TAG, "⚠️ No valid sensor ID found, but I2C communication works - continuing with generic config");
+    ESP_LOGW(TAG, "No valid sensor ID found, but I2C communication works - continuing with generic config");
     chip_id_1 = 0x00;
     chip_id_2 = 0x00;
   }
   
   // Configuration basée sur l'ID trouvé ou configuration générique
   if (id_found && (chip_id_2 == 0xA0 || chip_id_2 == 0xA2 || chip_id_2 == 0xA1)) {
-    ESP_LOGI(TAG, "🎯 SC2356 sensor confirmed! ID: 0x%02X%02X", chip_id_1, chip_id_2);
+    ESP_LOGI(TAG, "SC2356 sensor confirmed! ID: 0x%02X%02X", chip_id_1, chip_id_2);
     
     // Configuration SC2356 optimisée
-    ESP_LOGI(TAG, "🔧 Configuring SC2356 with full register set...");
+    ESP_LOGI(TAG, "Configuring SC2356 with full register set...");
     
-    const struct {
+    struct sc2356_reg {
       uint8_t reg;
       uint8_t val;
       const char* desc;
       bool critical;
-    } sc2356_config[] = {
+    };
+    
+    const struct sc2356_reg sc2356_config[] = {
       // Reset et initialisation
-      {0x12, 0x80, "Software reset", true},            // Reset du capteur
-      // Attendre après reset
-      {0x00, 0x00, "Wait after reset", false},         // Dummy pour délai
-      
-      // Configuration système
+      {0x12, 0x80, "Software reset", true},
       {0x09, 0x10, "System control", true},
       {0x0C, 0x00, "Output control", false},
       {0x0D, 0x01, "Output format enable", false},
       
       // Configuration de la résolution VGA (640x480)
-      {0x17, 0x00, "HSTART High", false},              // Horizontal start
-      {0x18, 0xA0, "HSIZE High", false},               // Horizontal size
-      {0x19, 0x00, "VSTART High", false},              // Vertical start
-      {0x1A, 0x78, "VSIZE High", false},               // Vertical size
-      {0x03, 0x00, "VREF", false},                     // Vertical reference
+      {0x17, 0x00, "HSTART High", false},
+      {0x18, 0xA0, "HSIZE High", false},
+      {0x19, 0x00, "VSTART High", false},
+      {0x1A, 0x78, "VSIZE High", false},
+      {0x03, 0x00, "VREF", false},
       
       // Format de sortie RGB565
       {0x15, 0x02, "Output format RGB565", false},
       {0x40, 0x10, "COM15 RGB565 full range", false},
       
       // Configuration des horloges et timing
-      {0x11, 0x00, "Clock prescaler", false},          // Pas de division d'horloge
+      {0x11, 0x00, "Clock prescaler", false},
       {0x32, 0x00, "HREF control", false},
       {0x37, 0x00, "ADC control", false},
       
@@ -278,72 +279,59 @@ bool Tab5Camera::init_sensor_() {
       {0x10, 0x00, "AEC MSB", false},
       {0x04, 0x00, "AEC LSB", false},
       
-      // Configuration des fenêtres
-      {0x14, 0x38, "COM9", false},
-      {0x24, 0x3C, "AEW", false},
-      {0x25, 0x36, "AEB", false},
-      {0x26, 0x72, "VPT", false},
-      
-      // Matrice de couleur pour RGB565
-      {0x4F, 0x80, "Matrix coeff 1", false},
-      {0x50, 0x80, "Matrix coeff 2", false},
-      {0x51, 0x00, "Matrix coeff 3", false},
-      {0x52, 0x22, "Matrix coeff 4", false},
-      {0x53, 0x5E, "Matrix coeff 5", false},
-      {0x54, 0x80, "Matrix coeff 6", false},
-      {0x58, 0x9E, "Matrix control", false},
-      
       // Sortir du mode standby
-      {0x12, 0x00, "Normal operation mode", true},
+      {0x12, 0x00, "Normal operation mode", true}
     };
     
     bool config_success = true;
+    bool reset_done = false;
     
     for (size_t i = 0; i < sizeof(sc2356_config) / sizeof(sc2356_config[0]); i++) {
       ESP_LOGD(TAG, "Setting %s: reg 0x%02X = 0x%02X", 
                sc2356_config[i].desc, sc2356_config[i].reg, sc2356_config[i].val);
       
-      // Délai spécial après reset
-      if (sc2356_config[i].reg == 0x00 && i > 0 && sc2356_config[i-1].reg == 0x12) {
-        ESP_LOGI(TAG, "Waiting 50ms after sensor reset...");
-        vTaskDelay(50 / portTICK_PERIOD_MS);
-        continue;  // Skip l'écriture du dummy register
-      }
-      
       if (!this->write_byte(sc2356_config[i].reg, sc2356_config[i].val)) {
         if (sc2356_config[i].critical) {
-          ESP_LOGE(TAG, "❌ Critical register write failed: 0x%02X", sc2356_config[i].reg);
+          ESP_LOGE(TAG, "Critical register write failed: 0x%02X", sc2356_config[i].reg);
           config_success = false;
           break;
         } else {
-          ESP_LOGW(TAG, "⚠️ Non-critical register write failed: 0x%02X - continuing", sc2356_config[i].reg);
+          ESP_LOGW(TAG, "Non-critical register write failed: 0x%02X - continuing", sc2356_config[i].reg);
         }
       }
       
-      // Délai entre les écritures
-      vTaskDelay(5 / portTICK_PERIOD_MS);
+      // Délai spécial après reset
+      if (sc2356_config[i].reg == 0x12 && sc2356_config[i].val == 0x80 && !reset_done) {
+        ESP_LOGI(TAG, "Waiting 50ms after sensor reset...");
+        vTaskDelay(50 / portTICK_PERIOD_MS);
+        reset_done = true;
+      } else {
+        vTaskDelay(5 / portTICK_PERIOD_MS);
+      }
     }
     
     if (!config_success) {
-      ESP_LOGE(TAG, "❌ SC2356 critical configuration failed");
+      ESP_LOGE(TAG, "SC2356 critical configuration failed");
       return false;
     }
     
   } else {
-    ESP_LOGW(TAG, "⚠️ Using generic sensor configuration (ID: 0x%02X%02X)", chip_id_1, chip_id_2);
+    ESP_LOGW(TAG, "Using generic sensor configuration (ID: 0x%02X%02X)", chip_id_1, chip_id_2);
     
     // Configuration générique mais plus complète
-    const struct {
+    struct generic_reg {
       uint8_t reg;
       uint8_t val;
       const char* desc;
-    } generic_config[] = {
-      {0x12, 0x00, "Normal operation", true},          // Pas de reset
-      {0x09, 0x00, "System control", false},
-      {0x15, 0x00, "Output format", false},
-      {0x11, 0x00, "Clock control", false},
-      {0x3A, 0x04, "TSLB register", false},
-      {0x13, 0x80, "COM8 basic", false},               // AEC/AGC basique
+    };
+    
+    const struct generic_reg generic_config[] = {
+      {0x12, 0x00, "Normal operation"},
+      {0x09, 0x00, "System control"},
+      {0x15, 0x00, "Output format"},
+      {0x11, 0x00, "Clock control"},
+      {0x3A, 0x04, "TSLB register"},
+      {0x13, 0x80, "COM8 basic"}
     };
     
     for (size_t i = 0; i < sizeof(generic_config) / sizeof(generic_config[0]); i++) {
@@ -357,28 +345,28 @@ bool Tab5Camera::init_sensor_() {
     }
   }
   
-  // Test final de communication - essayer plusieurs registres
+  // Test final de communication
   bool final_test_ok = false;
-  for (uint8_t test_reg : {0x00, 0x01, 0x0A, 0x12}) {
+  const uint8_t final_test_regs[] = {0x00, 0x01, 0x0A, 0x12};
+  for (size_t i = 0; i < sizeof(final_test_regs); i++) {
     uint16_t final_val;
-    if (this->read_byte_16(test_reg, &final_val)) {
-      ESP_LOGI(TAG, "✅ Final test: reg 0x%02X = 0x%02X", test_reg, (uint8_t)(final_val & 0xFF));
+    if (this->read_byte_16(final_test_regs[i], &final_val)) {
+      ESP_LOGI(TAG, "Final test: reg 0x%02X = 0x%02X", final_test_regs[i], (uint8_t)(final_val & 0xFF));
       final_test_ok = true;
       break;
     }
   }
   
   if (!final_test_ok) {
-    ESP_LOGE(TAG, "❌ Final sensor communication test failed");
+    ESP_LOGE(TAG, "Final sensor communication test failed");
     return false;
   }
   
   this->sensor_initialized_ = true;
-  ESP_LOGI(TAG, "✅ Camera sensor initialized successfully");
+  ESP_LOGI(TAG, "Camera sensor initialized successfully");
   
   return true;
 }
-
 // Fixed write_register_16 function using correct ESPHome I2C API
 bool Tab5Camera::write_register_16(uint16_t reg, uint8_t val) {
   // For 16-bit registers, we need to write address high byte, low byte, then value
