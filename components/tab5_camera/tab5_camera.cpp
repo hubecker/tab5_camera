@@ -4,10 +4,10 @@
 #include "esphome/core/hal.h"
 #include "esp_timer.h"
 #include "esp_cam_ctlr_csi.h"
-//#include "esp_cam_sensor.h"
+#include "esp_cam_sensor.h"
 #include "driver/jpeg_encode.h"
-//#include "esp_video_buffer.h"
-//#include "esp_video_internal.h"
+#include "esp_video_buffer.h"
+#include "esp_video_internal.h"
 
 #ifdef USE_ESP32
 
