@@ -6,6 +6,7 @@ from esphome.const import (
     CONF_NAME,
     CONF_ADDRESS,
     CONF_FREQUENCY,
+    CONF_TRIGGER_ID,  # ✅ import ajouté
 )
 from esphome import pins, automation
 from esphome.core import CORE
@@ -151,6 +152,7 @@ async def tab5_camera_stop_streaming_to_code(config, action_id, template_arg, ar
     var = cg.new_Pvariable(action_id, template_arg)
     await cg.register_parented(var, config[CONF_ID])
     return var
+
 
 
 
