@@ -249,7 +249,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   // Méthodes utilitaires privées
   void set_error_(const std::string &error);
   void clear_error_();
-  PixelFormat parse_pixel_format_(const std::string &format);
+  PixelFormat parse_pixel_format_(const std::string &format) const;  // Ajout de const
   size_t calculate_frame_size_() const;
   
   // Statistiques pour diagnostics
@@ -262,7 +262,6 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
 }  // namespace esphome
 
 #endif  // USE_ESP32
-
 
 
 
