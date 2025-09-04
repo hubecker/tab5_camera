@@ -3,6 +3,7 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/hal.h"
 #include "esp_timer.h"
+#include "driver/ledc.h"
 
 #ifdef USE_ESP32
 
@@ -263,6 +264,84 @@ bool Tab5Camera::configure_sc2356_() {
 
   return true;
 }
+bool Tab5Camera::setup_external_clock_() {
+  if (this->external_clock_pin_ == 0) {
+    ESP_LOGW(TAG, "No external clock pin configured - sensor may not work");
+    return true;
+  }
+  
+  ESP_LOGI(TAG, "Setting up 24MHz external clock on GPIO%u", this->external_clock_pin_);
+  
+  // Configuration du timer LEDC pour générer 24MHz
+  ledc_timer_config_t timer_conf = {};
+  timer_conf.duty_resolution = LEDC_TIMER_1_BIT;  // 1-bit = 50% duty cycle
+  timer_conf.freq_hz = this->external_clock_frequency_;  // 24MHz
+  timer_conf.speed_mode = LEDC_LOW_SPEED_MODE;
+  timer_conf.deconfigure = false;
+  timer_conf.clk_cfg = LEDC_AUTO_CLK;
+  timer_conf.timer_num = LEDC_TIMER_0;
+  
+  esp_err_t err = ledc_timer_config(&timer_conf);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "LEDC timer config failed for %uHz: %s", 
+             this->external_clock_frequency_, esp_err_to_name(err));
+    return false;
+  }
+  
+  // Configuration du canal LEDC sur le GPIO
+  ledc_channel_config_t ch_conf = {};
+  ch_conf.gpio_num = this->external_clock_pin_;
+  ch_conf.speed_mode = LEDC_LOW_SPEED_MODE;
+  ch_conf.channel = LEDC_CHANNEL_0;
+  ch_conf.intr_type = LEDC_INTR_DISABLE;
+  ch_conf.timer_sel = LEDC_TIMER_0;
+  ch_conf.duty = 1;  // 50% duty cycle (1 sur 2^1 = 1 sur 2)
+  ch_conf.hpoint = 0;
+  ch_conf.sleep_mode = LEDC_SLEEP_MODE_KEEP_ALIVE;  // Crucial pour maintenir l'horloge
+  
+  err = ledc_channel_config(&ch_conf);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "LEDC channel config failed: %s", esp_err_to_name(err));
+    return false;
+  }
+  
+  ESP_LOGI(TAG, "24MHz clock successfully configured on GPIO%u", this->external_clock_pin_);
+  return true;
+}
+
+// Modifiez la méthode init_camera_() pour inclure l'horloge
+bool Tab5Camera::init_camera_() {
+  if (this->camera_initialized_) {
+    ESP_LOGI(TAG, "Camera already initialized, skipping");
+    return true;
+  }
+
+  ESP_LOGI(TAG, "Starting camera initialization for '%s'", this->name_.c_str());
+
+  // Étape 0: Configuration de l'horloge externe (NOUVEAU - CRITIQUE)
+  ESP_LOGI(TAG, "Step 2.0: Setting up external clock");
+  if (!this->setup_external_clock_()) {
+    ESP_LOGE(TAG, "Failed to setup external clock - camera will not work");
+    return false;
+  }
+  ESP_LOGI(TAG, "External clock configured successfully");
+
+  // Étape 1: Initialisation du LDO MIPI
+  ESP_LOGI(TAG, "Step 2.1: Initializing MIPI LDO");
+  if (!this->init_ldo_()) {
+    ESP_LOGE(TAG, "Failed to initialize MIPI LDO");
+    return false;
+  }
+  ESP_LOGI(TAG, "MIPI LDO initialized successfully");
+
+  // Étape 2: Reset de la caméra (APRÈS l'horloge)
+  ESP_LOGI(TAG, "Step 2.2: Executing camera sensor reset");
+  vTaskDelay(100 / portTICK_PERIOD_MS);  // Laisser l'horloge se stabiliser
+  if (!this->reset_sensor_()) {
+    ESP_LOGW(TAG, "Camera reset failed, but continuing initialization");
+  }
+  ESP_LOGI(TAG, "Camera reset sequence completed");
+
 
 bool Tab5Camera::configure_sc2356_mipi_output_() {
   ESP_LOGI(TAG, "=== SC2356 MIPI OUTPUT CONFIGURATION ===");
