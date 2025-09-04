@@ -45,11 +45,13 @@
 #undef HAS_ESP32_P4_CAMERA
 #endif
 
-#endif // USE_ESP32
-
 /* -------------------------------------------------------------
- *  Namespace du composant
+ *  Fin de la section conditionnelle ESP32
  * ------------------------------------------------------------- */
+// NOTE : **NE PAS** fermer le #ifdef ici ! Le reste du fichier (namespace,
+ // classes, etc.) doit rester à l’intérieur du bloc USE_ESP32.
+// Le #endif correspondant sera placé à la toute fin du fichier.
+
 namespace esphome {
 namespace tab5_camera {
 
@@ -83,7 +85,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   Tab5Camera() = default;
   ~Tab5Camera();
 
-  /* ----- ESPHome lifecycle ----- */
+  /* ----- Cycle de vie ESPHome ----- */
   void setup() override;
   void dump_config() override;
   float get_setup_priority() const override;
@@ -307,6 +309,9 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
 }  // namespace tab5_camera
 }  // namespace esphome
 
+/* -------------------------------------------------------------
+ *  Fermeture du bloc conditionnel ESP32
+ * ------------------------------------------------------------- */
 #endif  // USE_ESP32
 
 
