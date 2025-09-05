@@ -241,21 +241,21 @@ bool Tab5Camera::identify_sensor_() {
   
   bool sensor_identified = false;
   
-  // Lecture des registres SC2356
+  // Lecture des registres SC2356 en 16 bits
   uint8_t id_high = 0, id_low = 0;
-  if (this->read_byte(0x3107, &id_high) && this->read_byte(0x3108, &id_low)) {
+  if (this->read_register_16(0x3107, &id_high) && this->read_register_16(0x3108, &id_low)) {
     uint16_t sensor_id = (id_high << 8) | id_low;
-    ESP_LOGI(TAG, "Sensor ID registers: 0x3107=0x%02X  0x3108=0x%02X (ID=0x%04X)", id_high, id_low, sensor_id);
+    ESP_LOGI(TAG, "Sensor ID registers: 0x3107=0x%02X 0x3108=0x%02X (ID=0x%04X)", id_high, id_low, sensor_id);
     if (sensor_id == 0x2356) {
       ESP_LOGI(TAG, "✅ Detected SmartSens SC2356 sensor");
-      this->sensor_model_ = SENSOR_MODEL_SC2356;
+      sensor_initialized_ = true;  // utilisation de sensor_initialized_ au lieu de sensor_model_
       return true;
     }
   } else {
     ESP_LOGW(TAG, "Could not read SC2356 ID registers");
   }
-  
-  // Test des registres déjà présents (OmniVision / SmartSens génériques)
+
+  // Test des registres génériques
   struct {
     uint8_t reg;
     const char* desc;
@@ -284,7 +284,7 @@ bool Tab5Camera::identify_sensor_() {
     }
   }
   
-  // Tentative d'identification spécifique OmniVision
+  // Identification OmniVision
   if (id_values[2] == 0x76 && id_values[3] == 0x40) {
     ESP_LOGI(TAG, "Detected: OmniVision OV2640 sensor");
     sensor_identified = true;
@@ -301,29 +301,22 @@ bool Tab5Camera::identify_sensor_() {
   return sensor_identified;
 }
 
-
 bool Tab5Camera::configure_minimal_sensor_() {
   ESP_LOGI(TAG, "=== MINIMAL SENSOR CONFIGURATION ===");
   
-  // Configuration absolument minimale compatible avec la plupart des capteurs
   const struct {
-    uint8_t reg;
+    uint16_t reg;  // passe en uint16_t pour supporter les registres 16 bits
     uint8_t val;
     const char* desc;
     uint32_t delay_ms;
   } minimal_config[] = {
-    // Reset et configuration de base
     {0x12, 0x80, "Software reset", 100},
     {0x12, 0x00, "Normal operation", 50},
     {0x09, 0x00, "Output control - standby", 10},
     {0x15, 0x00, "Output format RAW8", 10},
-    
-    // Configuration d'horloge et timing basique
     {0x11, 0x00, "Clock prescaler = 1", 10},
     {0x6B, 0x10, "PLL control", 10},
     {0x6C, 0x40, "PLL multiplier", 10},
-    
-    // Fenêtrage pour VGA (640x480)
     {0x17, 0x00, "HSTART MSB", 5},
     {0x18, 0x00, "HSTART LSB", 5}, 
     {0x19, 0x02, "HSIZE MSB", 5},
@@ -332,42 +325,39 @@ bool Tab5Camera::configure_minimal_sensor_() {
     {0x32, 0x00, "VSTART LSB", 5},
     {0x20, 0x01, "VSIZE MSB", 5}, 
     {0x21, 0xE0, "VSIZE LSB (480)", 5},
-    
-    // Activation des sorties
     {0x3A, 0x04, "Enable MIPI output", 10},
     {0x3D, 0xC0, "COM13 - enable output", 10},
-    
-    // Configuration finale
     {0x09, 0x10, "Enable sensor output", 20},
   };
 
-  for (size_t i = 0; i < sizeof(minimal_config) / sizeof(minimal_config[0]); i++) {
+  for (size_t i = 0; i < sizeof(minimal_config)/sizeof(minimal_config[0]); i++) {
     const auto& config = minimal_config[i];
-    ESP_LOGD(TAG, "Setting %s: 0x%02X = 0x%02X", config.desc, config.reg, config.val);
+    ESP_LOGD(TAG, "Setting %s: 0x%04X = 0x%02X", config.desc, config.reg, config.val);
     
-    if (this->write_byte(config.reg, config.val)) {
+    if (this->write_register_16(config.reg, config.val)) {
       vTaskDelay(config.delay_ms / portTICK_PERIOD_MS);
       
       // Vérification pour les registres critiques
       if (config.reg == 0x12 || config.reg == 0x09 || config.reg == 0x15) {
         uint8_t readback;
-        if (this->read_byte(config.reg, &readback)) {
+        if (this->read_register_16(config.reg, &readback)) {
           if (readback == config.val) {
-            ESP_LOGI(TAG, "✓ Critical reg 0x%02X confirmed: 0x%02X", config.reg, readback);
+            ESP_LOGI(TAG, "✓ Critical reg 0x%04X confirmed: 0x%02X", config.reg, readback);
           } else {
-            ESP_LOGW(TAG, "⚠ Critical reg 0x%02X mismatch: wrote 0x%02X, read 0x%02X", 
+            ESP_LOGW(TAG, "⚠ Critical reg 0x%04X mismatch: wrote 0x%02X, read 0x%02X", 
                      config.reg, config.val, readback);
           }
         }
       }
     } else {
-      ESP_LOGW(TAG, "Failed to write register 0x%02X", config.reg);
+      ESP_LOGW(TAG, "Failed to write register 0x%04X", config.reg);
     }
   }
   
   ESP_LOGI(TAG, "Minimal sensor configuration completed");
   return true;
 }
+
 
 bool Tab5Camera::init_ldo_() {
   if (this->ldo_initialized_) {
