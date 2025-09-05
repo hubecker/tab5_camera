@@ -319,70 +319,54 @@ bool Tab5Camera::setup_external_clock_() {
 
 
 bool Tab5Camera::configure_sc2356_mipi_output_() {
-  ESP_LOGI(TAG, "=== SC2356 MIPI OUTPUT CONFIGURATION ===");
-
-  // 1. Configuration MIPI spécifique
+  ESP_LOGI(TAG, "=== SC2356 MIPI OUTPUT CONFIGURATION (Corrected) ===");
+  
+  // SC2356 utilise des registres 16-bit
   const struct {
-    uint8_t reg;
+    uint16_t reg;  // Changé en 16-bit
     uint8_t val;
     const char* desc;
     bool critical;
   } mipi_config[] = {
-    // Configuration MIPI de base
-    {0x4F, 0x04, "MIPI enable", true},
-    {0x50, 0x02, "MIPI 2 data lanes", true},
-    {0x51, 0x00, "MIPI timing control", false},
-    {0x52, 0x47, "MIPI HS settle", false},
-    {0x53, 0x0F, "MIPI CLK settle", false},
-    
-    // Activation des sorties
-    {0x3A, 0x04, "TSLB - enable MIPI output", true},
-    {0x3D, 0xC0, "COM13 - enable data output", true},
-    {0x3E, 0x03, "COM14 - output enable", false},
-    
-    // Configuration du HREF et des signaux de synchronisation
-    {0x32, 0x80, "HREF control - enable", false},
-    {0x37, 0xC0, "ADC control", false},
-    
-    // Contrôle exposition et gain de base
-    {0x13, 0x87, "COM8 - enable AGC/AEC", false},
-    {0x00, 0x00, "Gain control", false},
-    {0x10, 0x00, "AEC MSB", false},
-    {0x04, 0x00, "AEC LSB", false},
-    
-    // Configuration finale pour démarrer le streaming
-    {0x09, 0x10, "Enable sensor data output", true},
+    // Adresses correctes pour SC2356
+    {0x0100, 0x01, "Stream enable", true},          // Active le streaming
+    {0x3018, 0x72, "MIPI 2 lane config", true},     // 2 lanes MIPI
+    {0x3019, 0x00, "MIPI timing", false},
+    {0x301A, 0x00, "MIPI ctrl", false},
+    {0x3031, 0x0A, "MIPI per lane", true},
+    {0x3037, 0x20, "PLL ctrl", false},
+    {0x3038, 0x02, "PLL multiplier", false},
+    {0x3039, 0x00, "PLL config", false},
   };
 
   for (size_t i = 0; i < sizeof(mipi_config) / sizeof(mipi_config[0]); i++) {
-    ESP_LOGD(TAG, "Setting %s: 0x%02X = 0x%02X", 
+    ESP_LOGD(TAG, "Setting %s: 0x%04X = 0x%02X", 
              mipi_config[i].desc, mipi_config[i].reg, mipi_config[i].val);
     
-    if (!this->write_byte(mipi_config[i].reg, mipi_config[i].val)) {
+    if (!this->write_register_16(mipi_config[i].reg, mipi_config[i].val)) {
       if (mipi_config[i].critical) {
-        ESP_LOGE(TAG, "Failed to write critical MIPI register 0x%02X", mipi_config[i].reg);
+        ESP_LOGE(TAG, "Failed to write critical register 0x%04X", mipi_config[i].reg);
         return false;
       } else {
-        ESP_LOGW(TAG, "Failed to write MIPI register 0x%02X", mipi_config[i].reg);
+        ESP_LOGW(TAG, "Failed to write register 0x%04X", mipi_config[i].reg);
       }
     }
     vTaskDelay(10 / portTICK_PERIOD_MS);
   }
 
-  // 2. Vérification finale
-  ESP_LOGI(TAG, "Step 2: Final MIPI verification");
-  uint8_t verify_regs[] = {0x12, 0x09, 0x15, 0x3A, 0x4F, 0x50};
-  for (size_t i = 0; i < sizeof(verify_regs); i++) {
+  // Vérification avec les bonnes adresses
+  ESP_LOGI(TAG, "Final verification with 16-bit addresses");
+  uint16_t verify_regs[] = {0x0100, 0x3018, 0x3031};
+  for (size_t i = 0; i < sizeof(verify_regs)/sizeof(verify_regs[0]); i++) {
     uint8_t val;
-    if (this->read_byte(verify_regs[i], &val)) {
-      ESP_LOGI(TAG, "Verify reg 0x%02X = 0x%02X", verify_regs[i], val);
+    if (this->read_register_16(verify_regs[i], &val)) {
+      ESP_LOGI(TAG, "Verify reg 0x%04X = 0x%02X", verify_regs[i], val);
     }
   }
-
+  
   ESP_LOGI(TAG, "=== SC2356 MIPI configuration completed ===");
   return true;
 }
-
 bool Tab5Camera::init_ldo_() {
   if (this->ldo_initialized_) {
     ESP_LOGI(TAG, "LDO already initialized, skipping");
