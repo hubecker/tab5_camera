@@ -117,6 +117,11 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   bool reset_sensor_();
   bool setup_external_clock_();
 
+    // SCCB / I2C
+  bool init_sccb_();
+  bool detect_sensor_with_sccb_();
+ 
+
   // --- Méthodes corrigées pour detection / config ---
   bool identify_sensor_();          // Détection avec SCCB/16-bit + fallback 8-bit
   bool configure_minimal_sensor_(); // Configuration minimale avec write_byte/read_byte
