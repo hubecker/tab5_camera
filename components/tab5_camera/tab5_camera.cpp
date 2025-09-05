@@ -5,7 +5,7 @@
 #include "esp_timer.h"
 #include "driver/ledc.h"
 //#include "../sensor/esp_cam_sensor.h"
-#include "esphome/components/sensor/esp_cam_sensor.h"
+#include "../sensor/esp_cam_sensor.h"
 
 #include "driver/jpeg_encode.h"
 #include "video/esp_video_buffer.h"
