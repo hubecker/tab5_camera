@@ -55,7 +55,10 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   void dump_config() override;
   float get_setup_priority() const override;
 
-  void set_sensor_address(uint8_t address) { this->sensor_address_ = address; this->set_i2c_address(address); }
+  void set_sensor_address(uint8_t address) { 
+    this->sensor_address_ = address; 
+    this->set_i2c_address(address); 
+  }
   void set_name(const std::string &name) { this->name_ = name; }
   void set_external_clock_pin(uint8_t pin) { this->external_clock_pin_ = pin; }
   void set_external_clock_frequency(uint32_t freq) { this->external_clock_frequency_ = freq; }
@@ -63,8 +66,12 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
 
   void set_resolution(uint16_t width, uint16_t height) { this->frame_width_ = width; this->frame_height_ = height; }
   void set_pixel_format(const std::string &format) { this->pixel_format_ = format; }
-  void set_jpeg_quality(uint8_t quality) { this->jpeg_quality_ = std::max<uint8_t>(1, std::min(quality, 63)); }
-  void set_framerate(uint8_t framerate) { this->framerate_ = std::max<uint8_t>(1, std::min(framerate, 60)); }
+  void set_jpeg_quality(uint8_t quality) { 
+    this->jpeg_quality_ = std::max<uint8_t>(1, std::min<uint8_t>(quality, static_cast<uint8_t>(63))); 
+  }
+  void set_framerate(uint8_t framerate) { 
+    this->framerate_ = std::max<uint8_t>(1, std::min<uint8_t>(framerate, static_cast<uint8_t>(60))); 
+  }
 
   const std::string &get_name() const { return this->name_; }
   uint16_t get_frame_width() const { return this->frame_width_; }
@@ -117,14 +124,13 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   bool reset_sensor_();
   bool setup_external_clock_();
 
-    // SCCB / I2C
+  // SCCB / I2C
   bool init_sccb_();
   bool detect_sensor_with_sccb_();
- 
 
-  // --- Méthodes corrigées pour detection / config ---
-  bool identify_sensor_();          // Détection avec SCCB/16-bit + fallback 8-bit
-  bool configure_minimal_sensor_(); // Configuration minimale avec write_byte/read_byte
+  // --- Méthodes de détection / configuration ---
+  bool identify_sensor_();
+  bool configure_minimal_sensor_();
   bool test_manual_capture_();
   bool start_continuous_capture_();
 
@@ -204,6 +210,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
 }  // namespace esphome
 
 #endif  // USE_ESP32
+
 
 
 
