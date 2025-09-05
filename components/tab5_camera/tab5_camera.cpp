@@ -116,49 +116,47 @@ bool Tab5Camera::is_ready() const {
 
 #ifdef HAS_ESP32_P4_CAMERA
 bool Tab5Camera::init_sccb_() {
+#ifdef HAS_ESP32_P4_CAMERA
     i2c_master_bus_config_t i2c_bus_config = {
         .clk_source = I2C_CLK_SRC_DEFAULT,
         .i2c_port   = I2C_NUM_0,
-        .scl_io_num = CONFIG_SCCB0_SCL,
-        .sda_io_num = CONFIG_SCCB0_SDA,
+        .scl_io_num = 21,  // à adapter selon ton câblage
+        .sda_io_num = 22,
         .glitch_ignore_cnt = 7,
     };
     i2c_master_bus_handle_t bus_handle;
-    if (i2c_new_master_bus(&i2c_bus_config, &bus_handle) != ESP_OK) return false;
-
-    sccb_i2c_config_t sccb_config = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address  = 0x36,  // Adresse I2C du capteur Tab5
-        .scl_speed_hz    = CONFIG_SCCB0_FREQUENCY,
-    };
-    if (sccb_new_i2c_io(bus_handle, &sccb_config, &sccb_io_) != ESP_OK) return false;
-
-    return true;
-}
-bool Tab5Camera::detect_sensor_with_sccb_() {
-    if (!sccb_io_) return false;
-
-#if CONFIG_CAMERA_SC2336
-    esp_cam_sensor_config_t cam_config = {
-        .sccb_handle = sccb_io_,
-        .reset_pin   = reset_pin_,
-        .pwdn_pin    = pwdn_pin_,
-        .xclk_pin    = xclk_pin_,
-    };
-
-    esp_cam_sensor_device_t *sensor = sc2336_detect(&cam_config);
-    if (!sensor) {
-        ESP_LOGW(TAG, "SC2336 detection failed");
+    if (i2c_new_master_bus(&i2c_bus_config, &bus_handle) != ESP_OK) {
+        set_error_("Failed to create I2C bus");
         return false;
     }
 
-    ESP_LOGI(TAG, "✅ SC2336 detected via SCCB");
-    esp_cam_sensor_del_dev(sensor);
-    return true;
-#endif
+    sccb_i2c_config_t sccb_config = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address  = this->sensor_address_,
+        .scl_speed_hz    = 400000,
+    };
+    if (sccb_new_i2c_io(bus_handle, &sccb_config, &this->sccb_handle_) != ESP_OK) {
+        i2c_del_master_bus(bus_handle);
+        set_error_("Failed to create SCCB handle");
+        return false;
+    }
 
+    this->i2c_bus_handle_ = bus_handle;
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool Tab5Camera::detect_sensor_with_sccb_() {
+    uint8_t val;
+    if (read_byte(0x00, &val)) {
+        ESP_LOGI(TAG, "Sensor detected via SCCB: reg0x00=0x%02X", val);
+        return true;
+    }
     return false;
 }
+
 
 bool Tab5Camera::reset_sensor_() {
   if (!this->reset_pin_) {
