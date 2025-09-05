@@ -215,6 +215,27 @@ bool Tab5Camera::setup_external_clock_() {
   ESP_LOGI(TAG, "24MHz clock successfully configured on GPIO%u", this->external_clock_pin_);
   return true;
 }
+void Tab5Camera::identify_sensor_() {
+  ESP_LOGI(TAG, "=== SENSOR IDENTIFICATION ===");
+
+  uint8_t id_high = 0, id_low = 0;
+  bool ok1 = this->read_register(0x3107, &id_high);
+  bool ok2 = this->read_register(0x3108, &id_low);
+
+  if (ok1 && ok2) {
+    uint16_t sensor_id = (id_high << 8) | id_low;
+    ESP_LOGI(TAG, "SC Sensor ID: 0x%04X", sensor_id);
+
+    if (sensor_id == 0x2356) {
+      ESP_LOGI(TAG, "✅ Detected SmartSens SC2356 sensor");
+      this->sensor_model_ = SENSOR_MODEL_SC2356;
+      return;
+    }
+  }
+
+  ESP_LOGW(TAG, "Unable to identify sensor - using generic configuration");
+  this->sensor_model_ = SENSOR_MODEL_GENERIC;
+}
 
 void Tab5Camera::verify_external_clock_() {
   ESP_LOGI(TAG, "=== EXTERNAL CLOCK VERIFICATION ===");
