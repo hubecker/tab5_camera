@@ -4,9 +4,7 @@
 #include "esphome/core/hal.h"
 #include "esp_timer.h"
 #include "driver/ledc.h"
-
 #include "esp_cam_sensor.h"
-
 #include "driver/jpeg_encode.h"
 #include "esp_video_buffer.h"
 #include "esp_video_internal.h"
@@ -25,7 +23,7 @@ static const char *const TAG = "tab5_camera";
 #define TAB5_STREAMING_STACK_SIZE 8192
 #define TAB5_FRAME_QUEUE_LENGTH 8
 
-// Configuration spécifique SC2356
+// Configuration spÃ©cifique SC2356
 #define SC2356_CHIP_ID_REG1    0x00
 #define SC2356_CHIP_ID_REG2    0x01
 #define SC2356_CHIP_ID_VAL1    0x00
@@ -46,7 +44,7 @@ void Tab5Camera::setup() {
   
   ESP_LOGI(TAG, "Step 1: Creating synchronization objects");
   
-  // Création des objets de synchronisation
+  // CrÃ©ation des objets de synchronisation
   this->frame_ready_semaphore_ = xSemaphoreCreateBinary();
   if (!this->frame_ready_semaphore_) {
     ESP_LOGE(TAG, "Failed to create frame ready semaphore");
@@ -137,7 +135,7 @@ bool Tab5Camera::reset_sensor_() {
   
   ESP_LOGI(TAG, "Executing hardware reset sequence");
   
-  // Séquence de reset hardware optimisée pour SC2356
+  // SÃ©quence de reset hardware optimisÃ©e pour SC2356
   this->reset_pin_->setup();
   
   // 1. Reset actif (LOW) - maintenir 20ms minimum
@@ -145,7 +143,7 @@ bool Tab5Camera::reset_sensor_() {
   ESP_LOGD(TAG, "Reset pin LOW");
   vTaskDelay(20 / portTICK_PERIOD_MS);
   
-  // 2. Relâcher le reset (HIGH)
+  // 2. RelÃ¢cher le reset (HIGH)
   this->reset_pin_->digital_write(true);
   ESP_LOGD(TAG, "Reset pin HIGH");
   
@@ -154,7 +152,7 @@ bool Tab5Camera::reset_sensor_() {
   
   ESP_LOGI(TAG, "Hardware reset sequence completed");
   
-  // 4. Test de communication après reset
+  // 4. Test de communication aprÃ¨s reset
   uint8_t test_val;
   int retry_count = 0;
   const int max_retries = 10;
@@ -173,33 +171,7 @@ bool Tab5Camera::reset_sensor_() {
   ESP_LOGE(TAG, "Sensor communication failed after reset");
   return false;
 }
-bool Tab5Camera::identify_sensor_() {
-  ESP_LOGI(TAG, "=== SENSOR IDENTIFICATION ===");
-  
-  // Test de différents registres d'ID courants
-  struct {
-    uint8_t reg;
-    const char* desc;
-  } id_regs[] = {
-    {0x00, "ID reg 0x00"},
-    {0x01, "ID reg 0x01"}, 
-    {0x0A, "ID reg 0x0A"},
-    {0x0B, "ID reg 0x0B"},
-    {0x1C, "Manufacturer ID"},
-    {0x1D, "Chip ID"},
-    {0x300A, "Chip ID High (if 16-bit)"},
-    {0x300B, "Chip ID Low (if 16-bit)"},
-  };
-  
-  for (auto& reg : id_regs) {
-    uint8_t val;
-    if (this->read_byte(reg.reg, &val)) {
-      ESP_LOGI(TAG, "%s: 0x%02X", reg.desc, val);
-    }
-  }
-  
-  return true;
-}
+
 bool Tab5Camera::configure_sc2356_() {
   ESP_LOGI(TAG, "=== SC2356 POWER-UP AND MIPI CONFIGURATION ===");
 
@@ -211,7 +183,7 @@ bool Tab5Camera::configure_sc2356_() {
   }
   vTaskDelay(100 / portTICK_PERIOD_MS);
 
-  // 2. Configuration minimale pour démarrer la sortie MIPI
+  // 2. Configuration minimale pour dÃ©marrer la sortie MIPI
   ESP_LOGI(TAG, "Step 2: Basic system configuration");
   const struct {
     uint8_t reg;
@@ -241,14 +213,14 @@ bool Tab5Camera::configure_sc2356_() {
     vTaskDelay(5 / portTICK_PERIOD_MS);
   }
 
-  // 3. Configuration de la résolution et du windowing
+  // 3. Configuration de la rÃ©solution et du windowing
   ESP_LOGI(TAG, "Step 3: Resolution and windowing setup");
   const struct {
     uint8_t reg;
     uint8_t val;
     const char* desc;
   } resolution_config[] = {
-    // Configuration des fenêtres pour VGA (640x480)
+    // Configuration des fenÃªtres pour VGA (640x480)
     {0x17, 0x00, "HSTART MSB"},
     {0x18, 0x00, "HSTART LSB"}, 
     {0x19, 0x00, "HSIZE MSB"},
@@ -306,7 +278,7 @@ bool Tab5Camera::setup_external_clock_() {
   
   ESP_LOGI(TAG, "Setting up 24MHz external clock on GPIO%u", this->external_clock_pin_);
   
-  // Configuration du timer LEDC pour générer 24MHz
+  // Configuration du timer LEDC pour gÃ©nÃ©rer 24MHz
   ledc_timer_config_t timer_conf = {};
   timer_conf.duty_resolution = LEDC_TIMER_1_BIT;  // 1-bit = 50% duty cycle
   timer_conf.freq_hz = this->external_clock_frequency_;  // 24MHz
@@ -343,56 +315,99 @@ bool Tab5Camera::setup_external_clock_() {
   return true;
 }
 
-
-bool Tab5Camera::configure_sc2356_mipi_output_() {
-  ESP_LOGI(TAG, "=== SC2356 MIPI OUTPUT CONFIGURATION (Corrected) ===");
+// Ajoutez cette fonction dans configure_sc2356_()
+bool Tab5Camera::identify_sensor_() {
+  ESP_LOGI(TAG, "=== SENSOR IDENTIFICATION ===");
   
-  // SC2356 utilise des registres 16-bit
+  // Test de différents registres d'ID courants
+  struct {
+    uint8_t reg;
+    const char* desc;
+  } id_regs[] = {
+    {0x00, "ID reg 0x00"},
+    {0x01, "ID reg 0x01"}, 
+    {0x0A, "ID reg 0x0A"},
+    {0x0B, "ID reg 0x0B"},
+    {0x1C, "Manufacturer ID"},
+    {0x1D, "Chip ID"},
+    {0x300A, "Chip ID High (if 16-bit)"},
+    {0x300B, "Chip ID Low (if 16-bit)"},
+  };
+  
+  for (auto& reg : id_regs) {
+    uint8_t val;
+    if (this->read_byte(reg.reg, &val)) {
+      ESP_LOGI(TAG, "%s: 0x%02X", reg.desc, val);
+    }
+  }
+  
+  return true;
+}
+bool Tab5Camera::configure_sc2356_mipi_output_() {
+  ESP_LOGI(TAG, "=== SC2356 MIPI OUTPUT CONFIGURATION ===");
+
+  // 1. Configuration MIPI spÃ©cifique
   const struct {
-    uint16_t reg;  // Changé en 16-bit
+    uint8_t reg;
     uint8_t val;
     const char* desc;
     bool critical;
   } mipi_config[] = {
-    // Adresses correctes pour SC2356
-    {0x0100, 0x01, "Stream enable", true},          // Active le streaming
-    {0x3018, 0x72, "MIPI 2 lane config", true},     // 2 lanes MIPI
-    {0x3019, 0x00, "MIPI timing", false},
-    {0x301A, 0x00, "MIPI ctrl", false},
-    {0x3031, 0x0A, "MIPI per lane", true},
-    {0x3037, 0x20, "PLL ctrl", false},
-    {0x3038, 0x02, "PLL multiplier", false},
-    {0x3039, 0x00, "PLL config", false},
+    // Configuration MIPI de base
+    {0x4F, 0x04, "MIPI enable", true},
+    {0x50, 0x02, "MIPI 2 data lanes", true},
+    {0x51, 0x00, "MIPI timing control", false},
+    {0x52, 0x47, "MIPI HS settle", false},
+    {0x53, 0x0F, "MIPI CLK settle", false},
+    
+    // Activation des sorties
+    {0x3A, 0x04, "TSLB - enable MIPI output", true},
+    {0x3D, 0xC0, "COM13 - enable data output", true},
+    {0x3E, 0x03, "COM14 - output enable", false},
+    
+    // Configuration du HREF et des signaux de synchronisation
+    {0x32, 0x80, "HREF control - enable", false},
+    {0x37, 0xC0, "ADC control", false},
+    
+    // ContrÃ´le exposition et gain de base
+    {0x13, 0x87, "COM8 - enable AGC/AEC", false},
+    {0x00, 0x00, "Gain control", false},
+    {0x10, 0x00, "AEC MSB", false},
+    {0x04, 0x00, "AEC LSB", false},
+    
+    // Configuration finale pour dÃ©marrer le streaming
+    {0x09, 0x10, "Enable sensor data output", true},
   };
 
   for (size_t i = 0; i < sizeof(mipi_config) / sizeof(mipi_config[0]); i++) {
-    ESP_LOGD(TAG, "Setting %s: 0x%04X = 0x%02X", 
+    ESP_LOGD(TAG, "Setting %s: 0x%02X = 0x%02X", 
              mipi_config[i].desc, mipi_config[i].reg, mipi_config[i].val);
     
-    if (!this->write_register_16(mipi_config[i].reg, mipi_config[i].val)) {
+    if (!this->write_byte(mipi_config[i].reg, mipi_config[i].val)) {
       if (mipi_config[i].critical) {
-        ESP_LOGE(TAG, "Failed to write critical register 0x%04X", mipi_config[i].reg);
+        ESP_LOGE(TAG, "Failed to write critical MIPI register 0x%02X", mipi_config[i].reg);
         return false;
       } else {
-        ESP_LOGW(TAG, "Failed to write register 0x%04X", mipi_config[i].reg);
+        ESP_LOGW(TAG, "Failed to write MIPI register 0x%02X", mipi_config[i].reg);
       }
     }
     vTaskDelay(10 / portTICK_PERIOD_MS);
   }
 
-  // Vérification avec les bonnes adresses
-  ESP_LOGI(TAG, "Final verification with 16-bit addresses");
-  uint16_t verify_regs[] = {0x0100, 0x3018, 0x3031};
-  for (size_t i = 0; i < sizeof(verify_regs)/sizeof(verify_regs[0]); i++) {
+  // 2. VÃ©rification finale
+  ESP_LOGI(TAG, "Step 2: Final MIPI verification");
+  uint8_t verify_regs[] = {0x12, 0x09, 0x15, 0x3A, 0x4F, 0x50};
+  for (size_t i = 0; i < sizeof(verify_regs); i++) {
     uint8_t val;
-    if (this->read_register_16(verify_regs[i], &val)) {
-      ESP_LOGI(TAG, "Verify reg 0x%04X = 0x%02X", verify_regs[i], val);
+    if (this->read_byte(verify_regs[i], &val)) {
+      ESP_LOGI(TAG, "Verify reg 0x%02X = 0x%02X", verify_regs[i], val);
     }
   }
-  
+
   ESP_LOGI(TAG, "=== SC2356 MIPI configuration completed ===");
   return true;
 }
+
 bool Tab5Camera::init_ldo_() {
   if (this->ldo_initialized_) {
     ESP_LOGI(TAG, "LDO already initialized, skipping");
@@ -445,7 +460,7 @@ bool Tab5Camera::init_sensor_() {
   
   ESP_LOGI(TAG, "I2C communication OK at address 0x%02X", this->address_);
   
-  // Reset et configuration complète du capteur
+  // Reset et configuration complÃ¨te du capteur
   if (!this->configure_sc2356_()) {
     ESP_LOGE(TAG, "Failed to configure SC2356 basic settings");
     return false;
@@ -470,7 +485,7 @@ bool Tab5Camera::init_camera_() {
 
   ESP_LOGI(TAG, "Starting camera initialization for '%s'", this->name_.c_str());
 
-  // Étape 0: Configuration de l'horloge externe (NOUVEAU - CRITIQUE)
+  // Ã‰tape 0: Configuration de l'horloge externe (NOUVEAU - CRITIQUE)
   ESP_LOGI(TAG, "Step 2.0: Setting up external clock");
   if (!this->setup_external_clock_()) {
     ESP_LOGE(TAG, "Failed to setup external clock - camera will not work");
@@ -478,7 +493,7 @@ bool Tab5Camera::init_camera_() {
   }
   ESP_LOGI(TAG, "External clock configured successfully");
 
-  // Étape 1: Initialisation du LDO MIPI
+  // Ã‰tape 1: Initialisation du LDO MIPI
   ESP_LOGI(TAG, "Step 2.1: Initializing MIPI LDO");
   if (!this->init_ldo_()) {
     ESP_LOGE(TAG, "Failed to initialize MIPI LDO");
@@ -486,7 +501,7 @@ bool Tab5Camera::init_camera_() {
   }
   ESP_LOGI(TAG, "MIPI LDO initialized successfully");
 
-  // Étape 2: Reset de la caméra (APRÈS l'horloge)
+  // Ã‰tape 2: Reset de la camÃ©ra (APRÃˆS l'horloge)
   ESP_LOGI(TAG, "Step 2.2: Executing camera sensor reset");
   vTaskDelay(100 / portTICK_PERIOD_MS);  // Laisser l'horloge se stabiliser
   if (!this->reset_sensor_()) {
@@ -494,7 +509,7 @@ bool Tab5Camera::init_camera_() {
   }
   ESP_LOGI(TAG, "Camera reset sequence completed");
 
-  // Étape 3: Initialisation du capteur I2C
+  // Ã‰tape 3: Initialisation du capteur I2C
   ESP_LOGI(TAG, "Step 2.3: Initializing camera sensor");
   if (!this->init_sensor_()) {
     ESP_LOGE(TAG, "Failed to initialize camera sensor");
@@ -502,7 +517,7 @@ bool Tab5Camera::init_camera_() {
   }
   ESP_LOGI(TAG, "Camera sensor initialized successfully");
 
-  // Étape 4: Allocation du frame buffer
+  // Ã‰tape 4: Allocation du frame buffer
   ESP_LOGI(TAG, "Step 2.4: Allocating frame buffer");
 
   this->frame_buffer_size_ = TAB5_CAMERA_H_RES * TAB5_CAMERA_V_RES * 2; // RGB565 = 2 bytes par pixel
@@ -522,7 +537,7 @@ bool Tab5Camera::init_camera_() {
 
   ESP_LOGI(TAG, "Frame buffer allocated successfully at %p", this->frame_buffer_);
 
-  // Étape 5: Configuration du contrôleur CSI
+  // Ã‰tape 5: Configuration du contrÃ´leur CSI
   ESP_LOGI(TAG, "Step 2.5: Configuring CSI controller");
   esp_cam_ctlr_csi_config_t csi_config = {};
   csi_config.ctlr_id = 0;
@@ -542,7 +557,7 @@ bool Tab5Camera::init_camera_() {
   }
   ESP_LOGI(TAG, "CSI controller created successfully");
   
-  // Étape 6: Configuration des callbacks
+  // Ã‰tape 6: Configuration des callbacks
   ESP_LOGI(TAG, "Step 2.6: Registering camera callbacks");
   esp_cam_ctlr_evt_cbs_t cbs = {
     .on_get_new_trans = nullptr,
@@ -556,7 +571,7 @@ bool Tab5Camera::init_camera_() {
   }
   ESP_LOGI(TAG, "Camera callbacks registered successfully");
   
-  // Étape 7: Activation du contrôleur de caméra
+  // Ã‰tape 7: Activation du contrÃ´leur de camÃ©ra
   ESP_LOGI(TAG, "Step 2.7: Enabling camera controller");
   ret = esp_cam_ctlr_enable(this->cam_handle_);
   if (ret != ESP_OK) {
@@ -565,7 +580,7 @@ bool Tab5Camera::init_camera_() {
   }
   ESP_LOGI(TAG, "Camera controller enabled successfully");
   
-  // Étape 8: Configuration de l'ISP
+  // Ã‰tape 8: Configuration de l'ISP
   ESP_LOGI(TAG, "Step 2.8: Configuring ISP processor");
   esp_isp_processor_cfg_t isp_config = {};
   isp_config.clk_hz = TAB5_ISP_CLOCK_HZ;
@@ -591,13 +606,13 @@ bool Tab5Camera::init_camera_() {
   }
   ESP_LOGI(TAG, "ISP processor enabled successfully");
   
-  // Étape 9: Initialisation du frame buffer
+  // Ã‰tape 9: Initialisation du frame buffer
   ESP_LOGI(TAG, "Step 2.9: Initializing frame buffer");
   memset(this->frame_buffer_, 0x00, this->frame_buffer_size_);
   esp_cache_msync(this->frame_buffer_, this->frame_buffer_size_, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
   ESP_LOGI(TAG, "Frame buffer initialized");
   
-  // Étape 10: Démarrage de la caméra
+  // Ã‰tape 10: DÃ©marrage de la camÃ©ra
   ESP_LOGI(TAG, "Step 2.10: Starting camera controller");
   ret = esp_cam_ctlr_start(this->cam_handle_);
   if (ret != ESP_OK) {
@@ -619,7 +634,7 @@ void Tab5Camera::process_frame_(uint8_t* data, size_t len) {
   // Appeler les callbacks traditionnels
   this->on_frame_callbacks_.call(data, len);
   
-  // Déclencher les triggers ESPHome
+  // DÃ©clencher les triggers ESPHome
   this->trigger_on_frame_callbacks_(data, len);
 }
 
@@ -640,22 +655,22 @@ bool Tab5Camera::camera_get_finished_trans_callback(esp_cam_ctlr_handle_t handle
   static uint32_t frame_count = 0;
   frame_count++;
   
-  ESP_LOGI(TAG, "📸 Frame #%u received: %zu bytes (expected: %zu)", 
+  ESP_LOGI(TAG, "ðŸ“¸ Frame #%u received: %zu bytes (expected: %zu)", 
            frame_count, trans->received_size, camera->frame_buffer_size_);
 
   if (trans->received_size == 0) {
-    ESP_LOGW(TAG, "⚠️ Frame #%u is empty - sensor might not be generating data", frame_count);
+    ESP_LOGW(TAG, "âš ï¸ Frame #%u is empty - sensor might not be generating data", frame_count);
     return false;
   }
   
   if (trans->received_size < 1000) {
-    ESP_LOGW(TAG, "⚠️ Frame #%u size is very small (%zu bytes)", frame_count, trans->received_size);
+    ESP_LOGW(TAG, "âš ï¸ Frame #%u size is very small (%zu bytes)", frame_count, trans->received_size);
   }
 
-  // Synchronisation du cache pour la frame reçue
+  // Synchronisation du cache pour la frame reÃ§ue
   esp_cache_msync(trans->buffer, trans->received_size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
   
-  // Vérification du contenu des premiers bytes
+  // VÃ©rification du contenu des premiers bytes
   uint8_t *data = static_cast<uint8_t*>(trans->buffer);
   ESP_LOGD(TAG, "Frame #%u first bytes: %02X %02X %02X %02X %02X %02X %02X %02X", 
            frame_count, data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]);
@@ -663,7 +678,7 @@ bool Tab5Camera::camera_get_finished_trans_callback(esp_cam_ctlr_handle_t handle
   // Traitement de la frame
   camera->process_frame_(data, trans->received_size);
   
-  // Création d'une structure FrameData
+  // CrÃ©ation d'une structure FrameData
   FrameData frame;
   frame.buffer = trans->buffer;
   frame.size = trans->received_size;
@@ -728,7 +743,7 @@ bool Tab5Camera::start_streaming() {
   this->streaming_should_stop_ = false;
   this->streaming_active_ = true;
   
-  // Création de la tâche de streaming
+  // CrÃ©ation de la tÃ¢che de streaming
   BaseType_t result = xTaskCreate(
     Tab5Camera::streaming_task,
     "tab5_streaming",
@@ -792,7 +807,7 @@ void Tab5Camera::streaming_loop_() {
       FrameData frame;
       if (xQueueReceive(this->frame_queue_, &frame, 0) == pdTRUE) {
         ESP_LOGV(TAG, "Frame received from callback, size: %zu bytes", frame.size);
-        // Le traitement est déjà fait dans process_frame_
+        // Le traitement est dÃ©jÃ  fait dans process_frame_
       }
     }
     vTaskDelay(1 / portTICK_PERIOD_MS);
@@ -851,7 +866,7 @@ void Tab5Camera::deinit_camera_() {
   }
 }
 
-// Méthodes utilitaires
+// MÃ©thodes utilitaires
 void Tab5Camera::set_error_(const std::string &error) {
   this->error_state_ = true;
   this->last_error_ = error;
@@ -874,7 +889,7 @@ PixelFormat Tab5Camera::parse_pixel_format_(const std::string &format) const {  
 }
 
 size_t Tab5Camera::calculate_frame_size_() const {
-  uint16_t bytes_per_pixel = 2; // RGB565 par défaut
+  uint16_t bytes_per_pixel = 2; // RGB565 par dÃ©faut
   
   switch (this->parse_pixel_format_(this->pixel_format_)) {
     case PixelFormat::RAW8:
@@ -932,7 +947,6 @@ bool Tab5Camera::read_register_16(uint16_t reg, uint8_t *val) {
 }  // namespace esphome
 
 #endif  // USE_ESP32
-
 
 
 
