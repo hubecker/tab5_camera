@@ -321,7 +321,7 @@ bool Tab5Camera::identify_sensor_() {
   
   // Test de différents registres d'ID courants
   struct {
-    uint8_t reg;
+    uint16_t reg;   // <-- changement ici
     const char* desc;
   } id_regs[] = {
     {0x00, "ID reg 0x00"},
@@ -343,6 +343,7 @@ bool Tab5Camera::identify_sensor_() {
   
   return true;
 }
+
 bool Tab5Camera::configure_sc2356_mipi_output_() {
   ESP_LOGI(TAG, "=== SC2356 MIPI OUTPUT CONFIGURATION ===");
 
