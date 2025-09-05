@@ -218,15 +218,27 @@ bool Tab5Camera::setup_external_clock_() {
 
 void Tab5Camera::verify_external_clock_() {
   ESP_LOGI(TAG, "=== EXTERNAL CLOCK VERIFICATION ===");
-  ESP_LOGI(TAG, "LEDC Channel -> GPIO: %d, Duty: %d, Timer: %d",
-           this->current_channel_config_.gpio_num,
-           this->current_channel_config_.duty,
-           this->current_channel_config_.timer_sel);
-
-  ESP_LOGI(TAG, "LEDC Timer -> Frequency: %d Hz, Resolution: %d bits",
-           this->current_timer_config_.freq_hz,
-           this->current_timer_config_.duty_resolution);
-
+  
+  // Test de la configuration LEDC
+  ledc_channel_config_t test_config;
+  esp_err_t err = ledc_get_channel_config(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, &test_config);
+  if (err == ESP_OK) {
+    ESP_LOGI(TAG, "LEDC Channel 0 - GPIO: %d, Duty: %d, Timer: %d", 
+             test_config.gpio_num, test_config.duty, test_config.timer_sel);
+  } else {
+    ESP_LOGE(TAG, "Failed to get LEDC channel config: %s", esp_err_to_name(err));
+  }
+  
+  // Mesure approximative du signal
+  ledc_timer_config_t timer_config;
+  err = ledc_get_timer_config(LEDC_LOW_SPEED_MODE, LEDC_TIMER_0, &timer_config);
+  if (err == ESP_OK) {
+    ESP_LOGI(TAG, "LEDC Timer 0 - Frequency: %d Hz, Resolution: %d bits", 
+             timer_config.freq_hz, timer_config.duty_resolution);
+  } else {
+    ESP_LOGE(TAG, "Failed to get LEDC timer config: %s", esp_err_to_name(err));
+  }
+}
 
 bool Tab5Camera::identify_sensor_() {
   ESP_LOGI(TAG, "=== SENSOR IDENTIFICATION ===");
