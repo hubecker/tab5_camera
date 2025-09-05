@@ -237,6 +237,8 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   uint8_t jpeg_quality_{10};
   uint8_t framerate_{15};
 
+  bool identify_sensor_();
+
   // Méthodes pour registres 16-bit (SC2356)
   bool write_register_16(uint16_t reg, uint8_t val);
   bool read_register_16(uint16_t reg, uint8_t *val);
