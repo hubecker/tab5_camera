@@ -215,27 +215,6 @@ bool Tab5Camera::setup_external_clock_() {
   ESP_LOGI(TAG, "24MHz clock successfully configured on GPIO%u", this->external_clock_pin_);
   return true;
 }
-void Tab5Camera::identify_sensor_() {
-  ESP_LOGI(TAG, "=== SENSOR IDENTIFICATION ===");
-
-  uint8_t id_high = 0, id_low = 0;
-  bool ok1 = this->read_register(0x3107, &id_high);
-  bool ok2 = this->read_register(0x3108, &id_low);
-
-  if (ok1 && ok2) {
-    uint16_t sensor_id = (id_high << 8) | id_low;
-    ESP_LOGI(TAG, "SC Sensor ID: 0x%04X", sensor_id);
-
-    if (sensor_id == 0x2356) {
-      ESP_LOGI(TAG, "✅ Detected SmartSens SC2356 sensor");
-      this->sensor_model_ = SENSOR_MODEL_SC2356;
-      return;
-    }
-  }
-
-  ESP_LOGW(TAG, "Unable to identify sensor - using generic configuration");
-  this->sensor_model_ = SENSOR_MODEL_GENERIC;
-}
 
 void Tab5Camera::verify_external_clock_() {
   ESP_LOGI(TAG, "=== EXTERNAL CLOCK VERIFICATION ===");
@@ -260,7 +239,23 @@ void Tab5Camera::verify_external_clock_() {
 bool Tab5Camera::identify_sensor_() {
   ESP_LOGI(TAG, "=== SENSOR IDENTIFICATION ===");
   
-  // Test de différents registres d'ID courants
+  bool sensor_identified = false;
+  
+  // Lecture des registres SC2356
+  uint8_t id_high = 0, id_low = 0;
+  if (this->read_byte(0x3107, &id_high) && this->read_byte(0x3108, &id_low)) {
+    uint16_t sensor_id = (id_high << 8) | id_low;
+    ESP_LOGI(TAG, "Sensor ID registers: 0x3107=0x%02X  0x3108=0x%02X (ID=0x%04X)", id_high, id_low, sensor_id);
+    if (sensor_id == 0x2356) {
+      ESP_LOGI(TAG, "✅ Detected SmartSens SC2356 sensor");
+      this->sensor_model_ = SENSOR_MODEL_SC2356;
+      return true;
+    }
+  } else {
+    ESP_LOGW(TAG, "Could not read SC2356 ID registers");
+  }
+  
+  // Test des registres déjà présents (OmniVision / SmartSens génériques)
   struct {
     uint8_t reg;
     const char* desc;
@@ -275,9 +270,7 @@ bool Tab5Camera::identify_sensor_() {
     {0x2B, "SmartSens ID2"},
   };
   
-  bool sensor_identified = false;
   uint8_t id_values[8] = {0};
-  
   for (size_t i = 0; i < sizeof(id_regs)/sizeof(id_regs[0]); i++) {
     uint8_t val;
     if (this->read_byte(id_regs[i].reg, &val)) {
@@ -291,19 +284,23 @@ bool Tab5Camera::identify_sensor_() {
     }
   }
   
-  // Tentative d'identification spécifique
+  // Tentative d'identification spécifique OmniVision
   if (id_values[2] == 0x76 && id_values[3] == 0x40) {
     ESP_LOGI(TAG, "Detected: OmniVision OV2640 sensor");
+    sensor_identified = true;
   } else if (id_values[2] == 0x56 && id_values[3] == 0x40) {
     ESP_LOGI(TAG, "Detected: OmniVision OV5640 sensor");  
+    sensor_identified = true;
   } else if (id_values[0] != 0x00 || id_values[1] != 0x00) {
     ESP_LOGI(TAG, "Detected: SmartSens or unknown sensor (0x%02X%02X)", id_values[0], id_values[1]);
+    sensor_identified = true;
   } else {
     ESP_LOGW(TAG, "Unable to identify sensor - using generic configuration");
   }
   
   return sensor_identified;
 }
+
 
 bool Tab5Camera::configure_minimal_sensor_() {
   ESP_LOGI(TAG, "=== MINIMAL SENSOR CONFIGURATION ===");
