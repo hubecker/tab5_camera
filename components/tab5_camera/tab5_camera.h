@@ -168,17 +168,17 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
 
   // Séquence de reset améliorée
   bool reset_sensor_();
-  bool setup_external_clock_();  // NOUVEAU - Configuration horloge LEDC
+  bool setup_external_clock_();
 
-  // Configuration spécifique SC2356
-  bool configure_sc2356_();
-  bool configure_sc2356_8bit_();
-  bool configure_sc2356_16bit_();
-  bool configure_sc2356_generic_();
-  bool configure_sc2356_mipi_output_();
+  // Configuration du capteur - versions corrigées
+  bool identify_sensor_();
+  bool configure_minimal_sensor_();
+  bool test_manual_capture_();
+  bool start_continuous_capture_();
   
   // Debug et diagnostic
-  void debug_camera_status();
+  void debug_camera_status_();
+  void verify_external_clock_();
   
   // Communication I2C avec le capteur
   bool read_sensor_register_(uint16_t reg, uint8_t *value);
@@ -203,6 +203,11 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   void *frame_buffer_{nullptr};
   size_t frame_buffer_size_{0};
   
+  // Buffers multiples pour capture continue
+  static constexpr size_t NUM_FRAME_BUFFERS = 3;
+  void *frame_buffers_[NUM_FRAME_BUFFERS]{nullptr};
+  size_t current_buffer_index_{0};
+  
   // États d'initialisation
   bool camera_initialized_{false};
   bool sensor_initialized_{false};
@@ -214,10 +219,10 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   QueueHandle_t frame_queue_{nullptr};
   bool streaming_active_{false};
   bool streaming_should_stop_{false};
+  bool continuous_capture_active_{false};
   
   // Configuration des buffers et tâches
   static constexpr size_t FRAME_QUEUE_SIZE = 3;
-  static constexpr size_t FRAME_BUFFER_COUNT = 1;
   static constexpr uint32_t STREAMING_TASK_STACK_SIZE = 4096;
   static constexpr UBaseType_t STREAMING_TASK_PRIORITY = 5;
 #endif
@@ -237,8 +242,6 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   uint8_t jpeg_quality_{10};
   uint8_t framerate_{15};
 
-  bool identify_sensor_();
-
   // Méthodes pour registres 16-bit (SC2356)
   bool write_register_16(uint16_t reg, uint8_t val);
   bool read_register_16(uint16_t reg, uint8_t *val);
@@ -254,7 +257,7 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
   // Méthodes utilitaires privées
   void set_error_(const std::string &error);
   void clear_error_();
-  PixelFormat parse_pixel_format_(const std::string &format) const;  // Ajout de const
+  PixelFormat parse_pixel_format_(const std::string &format) const;
   size_t calculate_frame_size_() const;
   
   // Statistiques pour diagnostics
@@ -267,7 +270,6 @@ class Tab5Camera : public Component, public i2c::I2CDevice {
 }  // namespace esphome
 
 #endif  // USE_ESP32
-
 
 
 
