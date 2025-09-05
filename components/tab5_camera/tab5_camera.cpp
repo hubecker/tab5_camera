@@ -115,6 +115,50 @@ bool Tab5Camera::is_ready() const {
 }
 
 #ifdef HAS_ESP32_P4_CAMERA
+bool Tab5Camera::init_sccb_() {
+    i2c_master_bus_config_t i2c_bus_config = {
+        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .i2c_port   = I2C_NUM_0,
+        .scl_io_num = CONFIG_SCCB0_SCL,
+        .sda_io_num = CONFIG_SCCB0_SDA,
+        .glitch_ignore_cnt = 7,
+    };
+    i2c_master_bus_handle_t bus_handle;
+    if (i2c_new_master_bus(&i2c_bus_config, &bus_handle) != ESP_OK) return false;
+
+    sccb_i2c_config_t sccb_config = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address  = 0x36,  // Adresse I2C du capteur Tab5
+        .scl_speed_hz    = CONFIG_SCCB0_FREQUENCY,
+    };
+    if (sccb_new_i2c_io(bus_handle, &sccb_config, &sccb_io_) != ESP_OK) return false;
+
+    return true;
+}
+bool Tab5Camera::detect_sensor_with_sccb_() {
+    if (!sccb_io_) return false;
+
+#if CONFIG_CAMERA_SC2336
+    esp_cam_sensor_config_t cam_config = {
+        .sccb_handle = sccb_io_,
+        .reset_pin   = reset_pin_,
+        .pwdn_pin    = pwdn_pin_,
+        .xclk_pin    = xclk_pin_,
+    };
+
+    esp_cam_sensor_device_t *sensor = sc2336_detect(&cam_config);
+    if (!sensor) {
+        ESP_LOGW(TAG, "SC2336 detection failed");
+        return false;
+    }
+
+    ESP_LOGI(TAG, "✅ SC2336 detected via SCCB");
+    esp_cam_sensor_del_dev(sensor);
+    return true;
+#endif
+
+    return false;
+}
 
 bool Tab5Camera::reset_sensor_() {
   if (!this->reset_pin_) {
@@ -237,122 +281,90 @@ void Tab5Camera::verify_external_clock_() {
 }
 
 bool Tab5Camera::identify_sensor_() {
-  ESP_LOGI(TAG, "=== SENSOR IDENTIFICATION ===");
-  
-  bool sensor_identified = false;
-  
-  // Lecture des registres SC2356 en 16 bits (ID)
-  uint8_t id_high = 0, id_low = 0;
-  if (this->read_register_16(0x3107, &id_high) && this->read_register_16(0x3108, &id_low)) {
-    uint16_t sensor_id = (id_high << 8) | id_low;
-    ESP_LOGI(TAG, "Sensor ID registers: 0x3107=0x%02X 0x3108=0x%02X (ID=0x%04X)", id_high, id_low, sensor_id);
-    if (sensor_id == 0x2356) {
-      ESP_LOGI(TAG, "✅ Detected SmartSens SC2356 sensor");
-      sensor_initialized_ = true;
-      return true;
-    }
-  } else {
-    ESP_LOGW(TAG, "Could not read SC2356 ID registers");
-  }
+    ESP_LOGI(TAG, "=== SENSOR IDENTIFICATION ===");
 
-  // Test des registres génériques (8-bit)
-  struct {
-    uint8_t reg;
-    const char* desc;
-  } id_regs[] = {
-    {0x00, "ID reg 0x00"},
-    {0x01, "ID reg 0x01"}, 
-    {0x0A, "OV Product ID MSB"},
-    {0x0B, "OV Product ID LSB"},
-    {0x1C, "Manufacturer ID"},
-    {0x1D, "Chip ID"},
-    {0x2A, "SmartSens ID1"},
-    {0x2B, "SmartSens ID2"},
-  };
-  
-  uint8_t id_values[8] = {0};
-  for (size_t i = 0; i < sizeof(id_regs)/sizeof(id_regs[0]); i++) {
-    uint8_t val;
-    if (this->read_byte(id_regs[i].reg, &val)) {  // <- lecture 8-bit
-      id_values[i] = val;
-      ESP_LOGI(TAG, "%s: 0x%02X", id_regs[i].desc, val);
-      if (val != 0x00) sensor_identified = true;
-    } else {
-      ESP_LOGD(TAG, "%s: No response", id_regs[i].desc);
-    }
-  }
-  
-  // Identification OmniVision / SmartSens
-  if (id_values[2] == 0x76 && id_values[3] == 0x40) {
-    ESP_LOGI(TAG, "Detected: OmniVision OV2640 sensor");
-    sensor_identified = true;
-  } else if (id_values[2] == 0x56 && id_values[3] == 0x40) {
-    ESP_LOGI(TAG, "Detected: OmniVision OV5640 sensor");  
-    sensor_identified = true;
-  } else if (id_values[0] != 0x00 || id_values[1] != 0x00) {
-    ESP_LOGI(TAG, "Detected: SmartSens or unknown sensor (0x%02X%02X)", id_values[0], id_values[1]);
-    sensor_identified = true;
-  } else {
-    ESP_LOGW(TAG, "Unable to identify sensor - using generic configuration");
-  }
-  
-  return sensor_identified;
-}
+    bool sensor_identified = false;
 
-bool Tab5Camera::configure_minimal_sensor_() {
-  ESP_LOGI(TAG, "=== MINIMAL SENSOR CONFIGURATION ===");
-  
-  const struct {
-    uint8_t reg;  // <- 8-bit pour tous les registres normaux
-    uint8_t val;
-    const char* desc;
-    uint32_t delay_ms;
-  } minimal_config[] = {
-    {0x12, 0x80, "Software reset", 100},
-    {0x12, 0x00, "Normal operation", 50},
-    {0x09, 0x00, "Output control - standby", 10},
-    {0x15, 0x00, "Output format RAW8", 10},
-    {0x11, 0x00, "Clock prescaler = 1", 10},
-    {0x6B, 0x10, "PLL control", 10},
-    {0x6C, 0x40, "PLL multiplier", 10},
-    {0x17, 0x00, "HSTART MSB", 5},
-    {0x18, 0x00, "HSTART LSB", 5}, 
-    {0x19, 0x02, "HSIZE MSB", 5},
-    {0x1A, 0x80, "HSIZE LSB (640)", 5},
-    {0x03, 0x00, "VSTART MSB", 5},
-    {0x32, 0x00, "VSTART LSB", 5},
-    {0x20, 0x01, "VSIZE MSB", 5}, 
-    {0x21, 0xE0, "VSIZE LSB (480)", 5},
-    {0x3A, 0x04, "Enable MIPI output", 10},
-    {0x3D, 0xC0, "COM13 - enable output", 10},
-    {0x09, 0x10, "Enable sensor output", 20},
-  };
+    // --- Étape 1 : tentative de détection via SCCB/M5Stack ---
+    if (init_sccb_()) {  // initialisation SCCB/I2C
+#if CONFIG_CAMERA_SC2336
+        esp_cam_sensor_config_t cam_config = {
+            .sccb_handle = sccb_io_,
+            .reset_pin   = reset_pin_,
+            .pwdn_pin    = pwdn_pin_,
+            .xclk_pin    = xclk_pin_,
+        };
 
-  for (size_t i = 0; i < sizeof(minimal_config)/sizeof(minimal_config[0]); i++) {
-    const auto& config = minimal_config[i];
-    ESP_LOGD(TAG, "Setting %s: 0x%02X = 0x%02X", config.desc, config.reg, config.val);
-    
-    if (this->write_byte(config.reg, config.val)) {  // <- écriture 8-bit
-      vTaskDelay(config.delay_ms / portTICK_PERIOD_MS);
-      
-      if (config.reg == 0x12 || config.reg == 0x09 || config.reg == 0x15) {
-        uint8_t readback;
-        if (this->read_byte(config.reg, &readback)) {
-          if (readback == config.val) {
-            ESP_LOGI(TAG, "✓ Critical reg 0x%02X confirmed: 0x%02X", config.reg, readback);
-          } else {
-            ESP_LOGW(TAG, "⚠ Critical reg 0x%02X mismatch: wrote 0x%02X, read 0x%02X", 
-                     config.reg, config.val, readback);
-          }
+        esp_cam_sensor_device_t *sensor = sc2336_detect(&cam_config);
+        if (sensor) {
+            ESP_LOGI(TAG, "✅ SC2336 detected via SCCB");
+            sensor_identified = true;
+            esp_cam_sensor_del_dev(sensor);
+            return true;  // capteur détecté avec succès
+        } else {
+            ESP_LOGW(TAG, "SC2336 detection via SCCB failed");
         }
-      }
+#endif
     } else {
-      ESP_LOGW(TAG, "Failed to write register 0x%02X", config.reg);
+        ESP_LOGW(TAG, "Failed to init SCCB/I2C for sensor detection");
     }
-  }
-  
-  ESP_LOGI(TAG, "Minimal sensor configuration completed");
-  return true;
+
+    // --- Étape 2 : tentative de lecture SC2356 ID 16-bit ---
+    uint8_t id_high = 0, id_low = 0;
+    if (this->read_register_16(0x3107, &id_high) && this->read_register_16(0x3108, &id_low)) {
+        uint16_t sensor_id = (id_high << 8) | id_low;
+        ESP_LOGI(TAG, "Sensor ID registers: 0x3107=0x%02X 0x3108=0x%02X (ID=0x%04X)", id_high, id_low, sensor_id);
+        if (sensor_id == 0x2356) {
+            ESP_LOGI(TAG, "✅ Detected SmartSens SC2356 sensor");
+            sensor_initialized_ = true;
+            return true;
+        }
+    } else {
+        ESP_LOGW(TAG, "Could not read SC2356 ID registers");
+    }
+
+    // --- Étape 3 : fallback sur détection générique 8-bit ---
+    struct {
+        uint8_t reg;
+        const char* desc;
+    } id_regs[] = {
+        {0x00, "ID reg 0x00"},
+        {0x01, "ID reg 0x01"},
+        {0x0A, "OV Product ID MSB"},
+        {0x0B, "OV Product ID LSB"},
+        {0x1C, "Manufacturer ID"},
+        {0x1D, "Chip ID"},
+        {0x2A, "SmartSens ID1"},
+        {0x2B, "SmartSens ID2"},
+    };
+
+    uint8_t id_values[8] = {0};
+    for (size_t i = 0; i < sizeof(id_regs)/sizeof(id_regs[0]); i++) {
+        uint8_t val;
+        if (this->read_byte(id_regs[i].reg, &val)) {
+            id_values[i] = val;
+            ESP_LOGI(TAG, "%s: 0x%02X", id_regs[i].desc, val);
+            if (val != 0x00) sensor_identified = true;
+        } else {
+            ESP_LOGD(TAG, "%s: No response", id_regs[i].desc);
+        }
+    }
+
+    // Identification OmniVision / SmartSens
+    if (id_values[2] == 0x76 && id_values[3] == 0x40) {
+        ESP_LOGI(TAG, "Detected: OmniVision OV2640 sensor");
+        sensor_identified = true;
+    } else if (id_values[2] == 0x56 && id_values[3] == 0x40) {
+        ESP_LOGI(TAG, "Detected: OmniVision OV5640 sensor");
+        sensor_identified = true;
+    } else if (id_values[0] != 0x00 || id_values[1] != 0x00) {
+        ESP_LOGI(TAG, "Detected: SmartSens or unknown sensor (0x%02X%02X)", id_values[0], id_values[1]);
+        sensor_identified = true;
+    } else {
+        ESP_LOGW(TAG, "Unable to identify sensor - using generic configuration");
+    }
+
+    return sensor_identified;
 }
 
 
