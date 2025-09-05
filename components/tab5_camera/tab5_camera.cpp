@@ -173,7 +173,33 @@ bool Tab5Camera::reset_sensor_() {
   ESP_LOGE(TAG, "Sensor communication failed after reset");
   return false;
 }
-
+bool Tab5Camera::identify_sensor_() {
+  ESP_LOGI(TAG, "=== SENSOR IDENTIFICATION ===");
+  
+  // Test de différents registres d'ID courants
+  struct {
+    uint8_t reg;
+    const char* desc;
+  } id_regs[] = {
+    {0x00, "ID reg 0x00"},
+    {0x01, "ID reg 0x01"}, 
+    {0x0A, "ID reg 0x0A"},
+    {0x0B, "ID reg 0x0B"},
+    {0x1C, "Manufacturer ID"},
+    {0x1D, "Chip ID"},
+    {0x300A, "Chip ID High (if 16-bit)"},
+    {0x300B, "Chip ID Low (if 16-bit)"},
+  };
+  
+  for (auto& reg : id_regs) {
+    uint8_t val;
+    if (this->read_byte(reg.reg, &val)) {
+      ESP_LOGI(TAG, "%s: 0x%02X", reg.desc, val);
+    }
+  }
+  
+  return true;
+}
 bool Tab5Camera::configure_sc2356_() {
   ESP_LOGI(TAG, "=== SC2356 POWER-UP AND MIPI CONFIGURATION ===");
 
