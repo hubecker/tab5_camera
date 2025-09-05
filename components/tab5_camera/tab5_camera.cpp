@@ -241,21 +241,21 @@ bool Tab5Camera::identify_sensor_() {
   
   bool sensor_identified = false;
   
-  // Lecture des registres SC2356 en 16 bits
+  // Lecture des registres SC2356 en 16 bits (ID)
   uint8_t id_high = 0, id_low = 0;
   if (this->read_register_16(0x3107, &id_high) && this->read_register_16(0x3108, &id_low)) {
     uint16_t sensor_id = (id_high << 8) | id_low;
     ESP_LOGI(TAG, "Sensor ID registers: 0x3107=0x%02X 0x3108=0x%02X (ID=0x%04X)", id_high, id_low, sensor_id);
     if (sensor_id == 0x2356) {
       ESP_LOGI(TAG, "✅ Detected SmartSens SC2356 sensor");
-      sensor_initialized_ = true;  // utilisation de sensor_initialized_ au lieu de sensor_model_
+      sensor_initialized_ = true;
       return true;
     }
   } else {
     ESP_LOGW(TAG, "Could not read SC2356 ID registers");
   }
 
-  // Test des registres génériques
+  // Test des registres génériques (8-bit)
   struct {
     uint8_t reg;
     const char* desc;
@@ -273,18 +273,16 @@ bool Tab5Camera::identify_sensor_() {
   uint8_t id_values[8] = {0};
   for (size_t i = 0; i < sizeof(id_regs)/sizeof(id_regs[0]); i++) {
     uint8_t val;
-    if (this->read_byte(id_regs[i].reg, &val)) {
+    if (this->read_byte(id_regs[i].reg, &val)) {  // <- lecture 8-bit
       id_values[i] = val;
       ESP_LOGI(TAG, "%s: 0x%02X", id_regs[i].desc, val);
-      if (val != 0x00) {
-        sensor_identified = true;
-      }
+      if (val != 0x00) sensor_identified = true;
     } else {
       ESP_LOGD(TAG, "%s: No response", id_regs[i].desc);
     }
   }
   
-  // Identification OmniVision
+  // Identification OmniVision / SmartSens
   if (id_values[2] == 0x76 && id_values[3] == 0x40) {
     ESP_LOGI(TAG, "Detected: OmniVision OV2640 sensor");
     sensor_identified = true;
@@ -305,7 +303,7 @@ bool Tab5Camera::configure_minimal_sensor_() {
   ESP_LOGI(TAG, "=== MINIMAL SENSOR CONFIGURATION ===");
   
   const struct {
-    uint16_t reg;  // passe en uint16_t pour supporter les registres 16 bits
+    uint8_t reg;  // <- 8-bit pour tous les registres normaux
     uint8_t val;
     const char* desc;
     uint32_t delay_ms;
@@ -332,31 +330,31 @@ bool Tab5Camera::configure_minimal_sensor_() {
 
   for (size_t i = 0; i < sizeof(minimal_config)/sizeof(minimal_config[0]); i++) {
     const auto& config = minimal_config[i];
-    ESP_LOGD(TAG, "Setting %s: 0x%04X = 0x%02X", config.desc, config.reg, config.val);
+    ESP_LOGD(TAG, "Setting %s: 0x%02X = 0x%02X", config.desc, config.reg, config.val);
     
-    if (this->write_register_16(config.reg, config.val)) {
+    if (this->write_byte(config.reg, config.val)) {  // <- écriture 8-bit
       vTaskDelay(config.delay_ms / portTICK_PERIOD_MS);
       
-      // Vérification pour les registres critiques
       if (config.reg == 0x12 || config.reg == 0x09 || config.reg == 0x15) {
         uint8_t readback;
-        if (this->read_register_16(config.reg, &readback)) {
+        if (this->read_byte(config.reg, &readback)) {
           if (readback == config.val) {
-            ESP_LOGI(TAG, "✓ Critical reg 0x%04X confirmed: 0x%02X", config.reg, readback);
+            ESP_LOGI(TAG, "✓ Critical reg 0x%02X confirmed: 0x%02X", config.reg, readback);
           } else {
-            ESP_LOGW(TAG, "⚠ Critical reg 0x%04X mismatch: wrote 0x%02X, read 0x%02X", 
+            ESP_LOGW(TAG, "⚠ Critical reg 0x%02X mismatch: wrote 0x%02X, read 0x%02X", 
                      config.reg, config.val, readback);
           }
         }
       }
     } else {
-      ESP_LOGW(TAG, "Failed to write register 0x%04X", config.reg);
+      ESP_LOGW(TAG, "Failed to write register 0x%02X", config.reg);
     }
   }
   
   ESP_LOGI(TAG, "Minimal sensor configuration completed");
   return true;
 }
+
 
 
 bool Tab5Camera::init_ldo_() {
