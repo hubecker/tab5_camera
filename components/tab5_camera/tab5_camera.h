@@ -16,7 +16,7 @@
  *  sccb_handle_t, …  (le fichier peut s’appeler sccb.h ou
  *  esp_sccb.h selon le dépôt que vous avez importé)
  * -------------------------------------------------------------- */
-#include "sccb.h"          // <-- changez le nom si votre header porte un autre nom
+#include "esp_sccb.h"          // <-- changez le nom si votre header porte un autre nom
 
 /* --------------------------------------------------------------
  *  ESP‑32 / ESP‑32‑P4 specific
