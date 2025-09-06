@@ -9,7 +9,7 @@
 /* --------------------------------------------------------------
  *  ESP‑IDF – I²C master‑bus (nouvelle API introduite v5.0)
  * -------------------------------------------------------------- */
-#include "driver/i2c.h"
+#include "esp_sccb_intf.h"
 
 /* --------------------------------------------------------------
  *  SCCB helper – fournit sccb_i2c_config_t, sccb_new_i2c_io(),
