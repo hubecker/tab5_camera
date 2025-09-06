@@ -9,14 +9,14 @@
 /* --------------------------------------------------------------
  *  ESP‑IDF – I²C master‑bus (nouvelle API introduite v5.0)
  * -------------------------------------------------------------- */
-#include "esp_sccb_intf.h"
+#include "driver/i2c.h"
 
 /* --------------------------------------------------------------
  *  SCCB helper – fournit sccb_i2c_config_t, sccb_new_i2c_io(),
  *  sccb_handle_t, …  (le fichier peut s’appeler sccb.h ou
  *  esp_sccb.h selon le dépôt que vous avez importé)
  * -------------------------------------------------------------- */
-#include "esp_sccb.h"          // <-- changez le nom si votre header porte un autre nom
+#include "esp_sccb_intf.h"         // <-- changez le nom si votre header porte un autre nom
 
 /* --------------------------------------------------------------
  *  ESP‑32 / ESP‑32‑P4 specific
