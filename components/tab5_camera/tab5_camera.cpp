@@ -678,6 +678,39 @@ void Tab5Camera::set_error_(const std::string &error) {
   ESP_LOGE(TAG, "Camera error: %s", error.c_str());
 }
 
+PixelFormat Tab5Camera::parse_pixel_format_(const std::string &format) const {
+  if (format == "RAW8") return PixelFormat::RAW8;
+  if (format == "RAW10") return PixelFormat::RAW10;
+  if (format == "YUV422") return PixelFormat::YUV422;
+  if (format == "RGB565") return PixelFormat::RGB565;
+  if (format == "JPEG") return PixelFormat::JPEG;
+  return PixelFormat::RGB565;
+}
+
+size_t Tab5Camera::calculate_frame_size_() const {
+  uint16_t bytes_per_pixel = 2; // RGB565 default
+  
+  switch (this->parse_pixel_format_(this->pixel_format_)) {
+    case PixelFormat::RAW8:
+      bytes_per_pixel = 1;
+      break;
+    case PixelFormat::RAW10:
+      bytes_per_pixel = 2;
+      break;
+    case PixelFormat::YUV422:
+      bytes_per_pixel = 2;
+      break;
+    case PixelFormat::RGB565:
+      bytes_per_pixel = 2;
+      break;
+    case PixelFormat::JPEG:
+      bytes_per_pixel = 1; // Variable, approximation
+      break;
+  }
+  
+  return this->frame_width_ * this->frame_height_ * bytes_per_pixel;
+}
+
 }  // namespace tab5_camera
 }  // namespace esphome
 
