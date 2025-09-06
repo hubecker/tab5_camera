@@ -6,27 +6,39 @@
 #include "esphome/core/automation.h"
 #include "esphome/components/i2c/i2c.h"
 
-/* --------------------------------------------------------------
- *  ESP‑IDF – I²C master‑bus (nouvelle API introduite v5.0)
- * -------------------------------------------------------------- */
-#include "driver/i2c.h"
-
-/* --------------------------------------------------------------
- *  SCCB helper – fournit sccb_i2c_config_t, sccb_new_i2c_io(),
- *  sccb_handle_t, …  (le fichier peut s’appeler sccb.h ou
- *  esp_sccb.h selon le dépôt que vous avez importé)
- * -------------------------------------------------------------- */
-#include "esp_sccb_intf.h"         // <-- changez le nom si votre header porte un autre nom
-
-/* --------------------------------------------------------------
- *  ESP‑32 / ESP‑32‑P4 specific
- * -------------------------------------------------------------- */
 #ifdef USE_ESP32
 
-/* Detect ESP32‑P4 target – enables the full camera stack */
+/* Detect ESP32-P4 target – enables the full camera stack */
 #if defined(CONFIG_IDF_TARGET_ESP32P4) || \
     (defined(CONFIG_IDF_TARGET) && defined(CONFIG_IDF_TARGET_ESP32P4))
 #define HAS_ESP32_P4_CAMERA 1
+
+/* ESP-IDF I2C master-bus (new API introduced v5.0) */
+#include "driver/i2c_master.h"
+
+/* SCCB helper – try different possible header locations */
+#if __has_include("esp_sccb_intf.h")
+#include "esp_sccb_intf.h"
+#elif __has_include("esp_sccb.h") 
+#include "esp_sccb.h"
+#elif __has_include("sccb_intf.h")
+#include "sccb_intf.h"
+#else
+/* Fallback: define basic SCCB types if headers not found */
+typedef void* sccb_handle_t;
+typedef struct {
+    uint8_t device_address;
+    uint32_t scl_speed_hz;
+    i2c_addr_bit_len_t dev_addr_length;
+} sccb_i2c_config_t;
+
+/* Declare function prototypes */
+extern "C" {
+esp_err_t sccb_new_i2c_io(i2c_master_bus_handle_t bus_handle, const sccb_i2c_config_t *config, sccb_handle_t *ret_handle);
+esp_err_t sccb_del_i2c_io(sccb_handle_t handle);
+}
+#define SCCB_FALLBACK_MODE 1
+#endif
 
 #include "esp_cam_ctlr_csi.h"
 #include "esp_cam_ctlr.h"
@@ -42,23 +54,19 @@
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 1, 0)
 #define ESP_P4_CAMERA_SUPPORTED 1
 #else
-#warning "ESP32‑P4 camera support requires IDF 5.1 or later"
+#warning "ESP32-P4 camera support requires IDF 5.1 or later"
 #undef HAS_ESP32_P4_CAMERA
 #endif
 
-#endif   // ESP32‑P4 target check
+#endif   // ESP32-P4 target check
 
 namespace esphome {
 namespace tab5_camera {
 
-/* ----------------------------------------------------------------
- *  Forward declaration
- * ---------------------------------------------------------------- */
+/* Forward declaration */
 class Tab5Camera;
 
-/* ----------------------------------------------------------------
- *  Trigger used for the “on_frame” automation
- * ---------------------------------------------------------------- */
+/* Trigger used for the "on_frame" automation */
 class OnFrameTrigger : public Trigger<uint8_t *, size_t> {
  public:
   explicit OnFrameTrigger(Tab5Camera *parent) : parent_(parent) {}
@@ -66,27 +74,23 @@ class OnFrameTrigger : public Trigger<uint8_t *, size_t> {
   Tab5Camera *parent_;
 };
 
-/* ----------------------------------------------------------------
- *  Enumerations
- * ---------------------------------------------------------------- */
+/* Enumerations */
 enum class PixelFormat { RAW8, RAW10, YUV422, RGB565, JPEG };
 enum class CameraResolution { QVGA_320x240, VGA_640x480, HD_720p, FHD_1080p };
 
-/* ----------------------------------------------------------------
- *  Main component class
- * ---------------------------------------------------------------- */
+/* Main component class */
 class Tab5Camera : public Component,
                   public i2c::I2CDevice {
  public:
   Tab5Camera() = default;
   ~Tab5Camera();
 
-  /* ----- Component lifecycle ----- */
+  /* Component lifecycle */
   void setup() override;
   void dump_config() override;
   float get_setup_priority() const override;
 
-  /* ----- Configuration setters ----- */
+  /* Configuration setters */
   void set_sensor_address(uint8_t address) {
     this->sensor_address_ = address;
     this->set_i2c_address(address);
@@ -108,7 +112,7 @@ class Tab5Camera : public Component,
     this->framerate_ = std::max<uint8_t>(1, std::min<uint8_t>(framerate, 60));
   }
 
-  /* ----- Public getters ----- */
+  /* Public getters */
   const std::string &get_name() const { return this->name_; }
   uint16_t get_frame_width() const { return this->frame_width_; }
   uint16_t get_frame_height() const { return this->frame_height_; }
@@ -117,7 +121,7 @@ class Tab5Camera : public Component,
   uint8_t get_framerate() const { return this->framerate_; }
   uint8_t get_sensor_address() const { return this->sensor_address_; }
 
-  /* ----- Core operations ----- */
+  /* Core operations */
   bool take_snapshot();
   bool start_streaming();
   bool stop_streaming();
@@ -130,7 +134,7 @@ class Tab5Camera : public Component,
     this->on_frame_triggers_.push_back(trigger);
   }
 
-  /* ----- P4‑specific API ----- */
+  /* P4-specific API */
 #ifdef HAS_ESP32_P4_CAMERA
   bool is_streaming() const { return this->streaming_active_; }
   uint8_t *get_frame_buffer() const {
@@ -142,7 +146,7 @@ class Tab5Camera : public Component,
   bool init_isp_processor();
   void cleanup_resources();
 #else
-  /* Stubs for non‑P4 builds */
+  /* Stubs for non-P4 builds */
   bool is_streaming() const { return false; }
   uint8_t *get_frame_buffer() const { return nullptr; }
   size_t get_frame_buffer_size() const { return 0; }
@@ -151,14 +155,14 @@ class Tab5Camera : public Component,
   void cleanup_resources() {}
 #endif
 
-  /* ----- Callback registration ----- */
+  /* Callback registration */
   void add_on_frame_callback(
       std::function<void(uint8_t *, size_t)> &&callback) {
     this->on_frame_callbacks_.add(std::move(callback));
   }
 
  protected:
-  /* ----- Internal structures ----- */
+  /* Internal structures */
 #ifdef HAS_ESP32_P4_CAMERA
   struct FrameData {
     void *buffer;
@@ -167,7 +171,7 @@ class Tab5Camera : public Component,
     bool valid;
   };
 
-  /* ----- Low‑level init / deinit ----- */
+  /* Low-level init / deinit */
   bool init_camera_();
   bool init_sensor_();
   bool init_ldo_();
@@ -176,11 +180,11 @@ class Tab5Camera : public Component,
   bool reset_sensor_();
   bool setup_external_clock_();
 
-  /* SCCB / I²C helpers */
+  /* SCCB / I2C helpers */
   bool init_sccb_();
   bool detect_sensor_with_sccb_();
 
-  /* ----- Sensor configuration ----- */
+  /* Sensor configuration */
   bool identify_sensor_();
   bool configure_minimal_sensor_();
   bool test_manual_capture_();
@@ -192,7 +196,7 @@ class Tab5Camera : public Component,
   bool read_sensor_register_(uint16_t reg, uint8_t *value);
   bool write_sensor_register_(uint16_t reg, uint8_t value);
 
-  /* ----- Callbacks used by ESP‑CAM driver ----- */
+  /* Callbacks used by ESP-CAM driver */
   static bool IRAM_ATTR camera_get_new_vb_callback(
       esp_cam_ctlr_handle_t handle,
       esp_cam_ctlr_trans_t *trans,
@@ -202,13 +206,13 @@ class Tab5Camera : public Component,
       esp_cam_ctlr_trans_t *trans,
       void *user_data);
 
-  /* ----- Streaming task ----- */
+  /* Streaming task */
   static void streaming_task(void *parameter);
   void streaming_loop_();
   void process_frame_(uint8_t *data, size_t len);
   void trigger_on_frame_callbacks_(uint8_t *data, size_t len);
 
-  /* ----- Handles & resources ----- */
+  /* Handles & resources */
   esp_cam_ctlr_handle_t cam_handle_{nullptr};
   isp_proc_handle_t isp_proc_{nullptr};
   esp_ldo_channel_handle_t ldo_mipi_phy_{nullptr};
@@ -236,12 +240,13 @@ class Tab5Camera : public Component,
   static constexpr uint32_t STREAMING_TASK_STACK_SIZE = 4096;
   static constexpr UBaseType_t STREAMING_TASK_PRIORITY = 5;
 
-  /* ----- SCCB handle (new) ----- */
-  sccb_handle_t sccb_handle_;   // <-- déclaré grâce à sccb.h
+  /* SCCB handle */
+  sccb_handle_t sccb_handle_{nullptr};
+  i2c_master_bus_handle_t i2c_bus_handle_{nullptr};
 #endif   // HAS_ESP32_P4_CAMERA
 
  private:
-  /* ----- User‑visible configuration ----- */
+  /* User-visible configuration */
   std::string name_{"Tab5 Camera"};
   uint8_t external_clock_pin_{0};
   uint32_t external_clock_frequency_{24000000};
@@ -254,7 +259,7 @@ class Tab5Camera : public Component,
   uint8_t jpeg_quality_{10};
   uint8_t framerate_{15};
 
-  /* ----- Helper methods ----- */
+  /* Helper methods */
   bool write_register_16(uint16_t reg, uint8_t val);
   bool read_register_16(uint16_t reg, uint8_t *val);
 
@@ -264,7 +269,7 @@ class Tab5Camera : public Component,
   PixelFormat parse_pixel_format_(const std::string &format) const;
   size_t calculate_frame_size_() const;
 
-  /* ----- State tracking ----- */
+  /* State tracking */
   bool error_state_{false};
   std::string last_error_{""};
 
