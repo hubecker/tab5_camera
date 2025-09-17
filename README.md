@@ -3,14 +3,14 @@
 external_components: 
   - source:
       type: git
-      url: https://github.com/youkorr/tab5_camera
+      url: https://github.com/hubecker/esp32p4_camera
       ref: main
-    components: [tab5_camera]
+    components: [tesp32p4_camera]
     refresh: 0s
 
 tab5_camera:
-  id: my_tab5_camera
-  name: "Tab5 Camera"
+  id: my_esp32p4_camera
+  name: "esp32p4 Camera"
   i2c_id: bsp_bus
   external_clock:
     pin: GPIO36
